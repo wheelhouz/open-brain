@@ -101,3 +101,32 @@ export function plainTextPreview(content: string, maxLines = 3): string {
     .slice(0, maxLines)
     .join("\n");
 }
+
+function isHeadlineWorthy(line: string): boolean {
+  if (!line || line.length > 120) return false;
+  if (/^https?:\/\/\S+$/.test(line)) return false;
+  if (line.length < 4) return false;
+  return true;
+}
+
+export function extractHeadline(content: string): { headline: string; body: string } | null {
+  const plain = content
+    .replace(/```[\s\S]*?```/g, "[code]")
+    .replace(/`[^`]+`/g, (m) => m.slice(1, -1))
+    .replace(/#{1,6}\s+/g, "")
+    .replace(/[*_~]+/g, "")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/^>\s+/gm, "");
+
+  const lines = plain.split("\n").filter((l) => l.trim());
+  if (lines.length === 0) return null;
+
+  const first = lines[0].trim();
+  if (!isHeadlineWorthy(first)) return null;
+
+  const body = lines.slice(1).filter((l) => l.trim()).slice(0, 2).join("\n");
+  return { headline: first, body };
+}
