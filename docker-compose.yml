@@ -1,0 +1,47 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: open_brain
+      POSTGRES_USER: brain_app
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - brain-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./db/init-dev.sql:/docker-entrypoint-initdb.d/02-init-dev.sql:ro
+    networks:
+      - brain-net
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brain_app -d open_brain"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    image: ${DOCKER_IMAGE:-ghcr.io/wheelhouz/open-brain:latest}
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8420:8420"
+    environment:
+      DATABASE_URL: postgresql://brain_app:${DB_PASSWORD}@db:5432/open_brain
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      BRAIN_ACCESS_KEY: ${BRAIN_ACCESS_KEY}
+      CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4-6}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      EXTRACTION_MODEL: ${EXTRACTION_MODEL:-openai/gpt-4o-mini}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - brain-net
+
+volumes:
+  brain-data:
+
+networks:
+  brain-net:
+    driver: bridge

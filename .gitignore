@@ -1,0 +1,8 @@
+.env
+.env.dev
+.env.prod
+node_modules/
+dist/
+*.log
+web/dist/
+.envrc
