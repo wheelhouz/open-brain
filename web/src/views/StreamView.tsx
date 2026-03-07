@@ -175,7 +175,7 @@ export function StreamView(_props: RoutableProps) {
               <h3 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
                 {formatDate(items[0].created_at)}
               </h3>
-              <div class="space-y-2">
+              <div class="space-y-3">
                 {items.map((thought) => (
                   <div
                     key={thought.id}
