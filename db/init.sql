@@ -38,6 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_created_at
     ON thoughts (created_at DESC);
 
 -- Vector similarity search with metadata filtering
+DROP FUNCTION IF EXISTS match_thoughts;
 CREATE OR REPLACE FUNCTION match_thoughts(
     query_embedding  vector(1536),
     match_threshold  float    DEFAULT 0.7,
