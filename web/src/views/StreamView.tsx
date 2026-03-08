@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "preact/hooks";
+import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Thought } from "../api";
 import { selectedThoughtId, lastDeletedId, lastCapturedThought, showToast } from "../state";
@@ -142,6 +142,27 @@ export function StreamView(_props: RoutableProps) {
     [],
   );
 
+  // Mobile infinite scroll via IntersectionObserver
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadThoughtsRef = useRef(loadThoughts);
+  loadThoughtsRef.current = loadThoughts;
+
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          loadThoughtsRef.current(false);
+        }
+      },
+      { rootMargin: "0px 0px 200px 0px" },
+    );
+
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore]);
+
   const groups = groupByDate(thoughts);
 
   return (
@@ -199,13 +220,11 @@ export function StreamView(_props: RoutableProps) {
           ))}
 
           {hasMore && (
-            <button
-              onClick={() => loadThoughts(false)}
-              disabled={loadingMore}
-              class="w-full py-2 text-sm text-[var(--accent)] hover:text-[var(--accent-hover)] disabled:opacity-50"
-            >
-              {loadingMore ? "Loading..." : "Load more"}
-            </button>
+            <div ref={sentinelRef} class="flex justify-center py-4">
+              {loadingMore && (
+                <div class="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
           )}
         </>
       )}
