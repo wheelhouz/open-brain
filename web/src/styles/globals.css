@@ -426,13 +426,7 @@ code:not(pre code) {
 
 /* ── Composer — always at top ──────────────────────── */
 .search-composer {
-  position: sticky;
-  top: 0;
-  z-index: 20;
   padding: 0.75rem 1rem;
-  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -504,8 +498,8 @@ code:not(pre code) {
 
 .search-composer-submit {
   flex-shrink: 0;
-  width: 2.125rem;
-  height: 2.125rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 50%;
   border: none;
   background: var(--bg-tertiary);

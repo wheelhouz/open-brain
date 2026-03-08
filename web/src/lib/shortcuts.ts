@@ -1,7 +1,7 @@
 import { route } from "preact-router";
 import { selectedThoughtId } from "../state";
 
-const TABS = ["/", "/search", "/topics", "/people", "/stats"];
+const TABS = ["/", "/topics", "/people", "/stats", "/chat"];
 
 function isEditing(): boolean {
   const el = document.activeElement;

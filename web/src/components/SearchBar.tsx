@@ -1,61 +1,77 @@
-import { useRef, useEffect } from "preact/hooks";
+import { useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { Search } from "lucide-preact";
+import { Search, X, ArrowUp } from "lucide-preact";
+import { searchQuery } from "../state";
 
-interface SearchBarProps {
-  value?: string;
-  onSearch?: (query: string) => void;
-  inline?: boolean;
-}
-
-export function SearchBar({ value = "", onSearch, inline }: SearchBarProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+export function SearchBar() {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (
-        e.key === "/" &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        document.activeElement?.tagName !== "INPUT" &&
-        document.activeElement?.tagName !== "TEXTAREA"
-      ) {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
 
   const handleInput = (e: Event) => {
     const q = (e.target as HTMLInputElement).value;
+    searchQuery.value = q;
     clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const path = window.location.pathname;
+      if (path === "/search") {
+        const url = q.trim() ? `/search?q=${encodeURIComponent(q)}` : "/search";
+        window.history.replaceState(null, "", url);
+      } else if (q.trim()) {
+        route(`/search?q=${encodeURIComponent(q)}`);
+      }
+    }, 300);
+  };
 
-    if (onSearch) {
-      timerRef.current = setTimeout(() => onSearch(q), 300);
-    } else {
-      timerRef.current = setTimeout(() => {
-        if (q.trim()) {
-          route(`/search?q=${encodeURIComponent(q)}`);
-        }
-      }, 300);
+  const handleSubmit = () => {
+    if (searchQuery.value.trim()) {
+      clearTimeout(timerRef.current);
+      route(`/search?q=${encodeURIComponent(searchQuery.value)}`);
     }
   };
 
+  const clearQuery = () => {
+    searchQuery.value = "";
+    if (window.location.pathname === "/search") {
+      window.history.replaceState(null, "", "/search");
+    }
+    document.getElementById("search-input")?.focus();
+  };
+
+  const hasQuery = searchQuery.value.trim().length > 0;
+
   return (
-    <div class={`relative ${inline ? "" : "w-full max-w-md"}`}>
-      <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-      <input
-        ref={inputRef}
-        type="text"
-        defaultValue={value}
-        onInput={handleInput}
-        placeholder='Search thoughts... (press "/")'
-        class="w-full pl-9 pr-3 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-color)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-        id="search-input"
-      />
+    <div class="w-full max-w-56 sm:max-w-sm">
+      <div class="search-composer-box" style="padding: 0.25rem 0.25rem 0.25rem 0.75rem;">
+        <Search class="search-composer-icon" />
+        <input
+          type="text"
+          value={searchQuery.value}
+          onInput={handleInput}
+          onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+          placeholder="Search thoughts..."
+          class="search-composer-input"
+          id="search-input"
+          style="padding: 0.25rem 0;"
+        />
+        {hasQuery && (
+          <button
+            type="button"
+            onClick={clearQuery}
+            class="search-composer-clear"
+            aria-label="Clear search"
+          >
+            <X class="w-3.5 h-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          class={`search-composer-submit ${hasQuery ? "search-composer-submit-active" : ""}`}
+          disabled={!hasQuery}
+          aria-label="Search"
+        >
+          <ArrowUp class="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

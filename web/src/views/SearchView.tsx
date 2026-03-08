@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "preact/hooks";
+import { useState, useEffect, useCallback } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Thought } from "../api";
-import { selectedThoughtId, lastDeletedId, showToast } from "../state";
+import { selectedThoughtId, lastDeletedId, showToast, searchQuery } from "../state";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { SwipeableCard } from "../components/SwipeableCard";
 import { DetailPanel } from "../components/DetailPanel";
-import { Search, X, ArrowUp } from "lucide-preact";
+import { Search } from "lucide-preact";
 
 const PRECISION_LEVELS = [
   { label: "Broad", value: 0.3 },
@@ -36,19 +36,23 @@ function SkeletonCard() {
 }
 
 export function SearchView(_props: RoutableProps) {
-  const [query, setQuery] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get("q") || "";
-  });
   const [precision, setPrecision] = useState(1);
   const [results, setResults] = useState<(Thought & { similarity: number })[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const threshold = PRECISION_LEVELS[precision].value;
 
-  const doSearch = async (q: string, t: number) => {
+  // Sync URL ?q= param to searchQuery on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlQuery = params.get("q") || "";
+    if (urlQuery && !searchQuery.value) {
+      searchQuery.value = urlQuery;
+    }
+  }, []);
+
+  const doSearch = useCallback(async (q: string, t: number) => {
     if (!q.trim()) {
       setResults([]);
       setSearched(false);
@@ -64,43 +68,21 @@ export function SearchView(_props: RoutableProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    if (query) doSearch(query, threshold);
   }, []);
 
-  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
-  const handleInput = (e: Event) => {
-    const q = (e.target as HTMLInputElement).value;
-    setQuery(q);
-    clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => {
-      const url = q.trim() ? `/search?q=${encodeURIComponent(q)}` : "/search";
-      window.history.replaceState(null, "", url);
+  // Trigger search when query or threshold changes
+  useEffect(() => {
+    const q = searchQuery.value;
+    if (q.trim()) {
       doSearch(q, threshold);
-    }, 300);
-  };
+    } else {
+      setResults([]);
+      setSearched(false);
+    }
+  }, [searchQuery.value, threshold, doSearch]);
 
   const handlePrecisionChange = (idx: number) => {
     setPrecision(idx);
-    if (query.trim()) doSearch(query, PRECISION_LEVELS[idx].value);
-  };
-
-  const clearQuery = () => {
-    setQuery("");
-    setResults([]);
-    setSearched(false);
-    window.history.replaceState(null, "", "/search");
-    inputRef.current?.focus();
-  };
-
-  const handleSubmit = (e: Event) => {
-    e.preventDefault();
-    if (query.trim()) {
-      clearTimeout(debounceTimer.current);
-      doSearch(query, threshold);
-    }
   };
 
   useEffect(() => {
@@ -117,46 +99,14 @@ export function SearchView(_props: RoutableProps) {
     setResults((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const query = searchQuery.value;
   const hasQuery = query.trim().length > 0;
   const hasResults = results.length > 0;
 
   return (
     <div class="search-view">
-      {/* Composer — always at top */}
+      {/* Precision pills */}
       <div class="search-composer">
-        <form class="search-composer-box" onSubmit={handleSubmit}>
-          <Search class="search-composer-icon" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onInput={handleInput}
-            placeholder="Search your thoughts..."
-            class="search-composer-input"
-            autofocus
-            id="search-input"
-          />
-          {hasQuery && (
-            <button
-              type="button"
-              onClick={clearQuery}
-              class="search-composer-clear"
-              aria-label="Clear search"
-            >
-              <X class="w-4 h-4" />
-            </button>
-          )}
-          <button
-            type="submit"
-            class={`search-composer-submit ${hasQuery ? "search-composer-submit-active" : ""}`}
-            disabled={!hasQuery}
-            aria-label="Search"
-          >
-            <ArrowUp class="w-4 h-4" />
-          </button>
-        </form>
-
-        {/* Precision pills */}
         <div class="search-precision">
           <div class="search-pills">
             {PRECISION_LEVELS.map((level, i) => (
@@ -226,7 +176,7 @@ export function SearchView(_props: RoutableProps) {
               <Search class="w-6 h-6" />
             </div>
             <p class="search-idle-title">Semantic search</p>
-            <p class="search-idle-hint">Find thoughts by meaning, not just keywords</p>
+            <p class="search-idle-hint">Type in the search bar above to find thoughts</p>
           </div>
         )}
       </div>
