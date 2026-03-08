@@ -1,4 +1,4 @@
-import { signal, computed } from "@preact/signals";
+import { signal } from "@preact/signals";
 
 export const isAuthenticated = signal(!!localStorage.getItem("brain_access_key"));
 export const selectedThoughtId = signal<string | null>(null);
@@ -21,6 +21,9 @@ export function applyTheme(t: "dark" | "light") {
 
 // Initialize theme on load
 applyTheme(theme.value);
+
+// Search state
+export const searchQuery = signal("");
 
 // Toast state
 export interface Toast {

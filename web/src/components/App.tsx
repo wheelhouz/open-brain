@@ -11,15 +11,15 @@ import { PeopleView } from "../views/PeopleView";
 import { StatsView } from "../views/StatsView";
 import { ChatView } from "../views/ChatView";
 import { CaptureBar } from "./CaptureBar";
-import { Brain, List, Search, Hash, Users, BarChart3, MessageCircle } from "lucide-preact";
+import { SearchBar } from "./SearchBar";
+import { Brain, List, Hash, Users, BarChart3, MessageCircle } from "lucide-preact";
 
 const tabs = [
   { path: "/", label: "Stream", icon: List, key: "1" },
-  { path: "/search", label: "Search", icon: Search, key: "2" },
-  { path: "/topics", label: "Topics", icon: Hash, key: "3" },
-  { path: "/people", label: "People", icon: Users, key: "4" },
-  { path: "/stats", label: "Stats", icon: BarChart3, key: "5" },
-  { path: "/chat", label: "Chat", icon: MessageCircle, key: "6" },
+  { path: "/topics", label: "Topics", icon: Hash, key: "2" },
+  { path: "/people", label: "People", icon: Users, key: "3" },
+  { path: "/stats", label: "Stats", icon: BarChart3, key: "4" },
+  { path: "/chat", label: "Chat", icon: MessageCircle, key: "5" },
 ];
 
 export function App() {
@@ -37,8 +37,8 @@ export function App() {
       <div class={`flex flex-col bg-[var(--bg-primary)] ${currentPath === "/chat" ? "chat-shell" : "min-h-screen"}`}>
         {/* Top bar */}
         <header class="sticky top-0 z-40 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
-          <div class="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
-            <a href="/" class="flex items-center gap-2 no-underline">
+          <div class="max-w-6xl mx-auto px-4 h-14 grid grid-cols-[auto_1fr_auto] items-center gap-4">
+            <a href="/" class="flex items-center gap-2 no-underline shrink-0">
               <Brain class="w-5 h-5 text-[var(--accent)]" />
               <span class="font-semibold text-[var(--text-primary)] hidden sm:inline">
                 Open Brain
@@ -49,6 +49,9 @@ export function App() {
                 </span>
               )}
             </a>
+            <div class="flex justify-center">
+              <SearchBar />
+            </div>
             <div class="flex items-center gap-1">
               <ThemeToggle />
             </div>
