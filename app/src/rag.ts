@@ -8,6 +8,7 @@ export interface RetrievedThought {
   metadata: Record<string, unknown>;
   similarity: number;
   created_at: string;
+  parent_id?: string | null;
   thread?: Array<{ content: string; created_at: string }>;
 }
 
@@ -64,16 +65,13 @@ function metadataOverlap(
   return matched / filterTerms.length;
 }
 
-function threadBonus(thought: { metadata: Record<string, unknown> }): number {
-  return thought.metadata.parent_id ? 1.0 : 0.0;
-}
-
 interface RankCandidate {
   id: string;
   content: string;
   metadata: Record<string, unknown>;
   similarity: number;
   created_at: string;
+  parent_id?: string | null;
 }
 
 function rerank(
@@ -93,7 +91,7 @@ function rerank(
       weights.similarity * c.similarity +
       weights.recency * recencyScore(c.created_at, halfLife) +
       weights.metadata * metadataOverlap(c.metadata || {}, filter) +
-      weights.thread * threadBonus({ metadata: c.metadata || {} });
+      weights.thread * (c.parent_id ? 1.0 : 0.0);
     return { ...c, _score: score };
   });
 
@@ -116,8 +114,8 @@ export async function searchWithReranking(options: {
     timeHint = null,
     limit = 10,
     threshold = 0.25,
-    poolSize = 15,
   } = options;
+  const poolSize = options.poolSize ?? Math.max(limit * 2, 15);
 
   const start = Date.now();
 
@@ -143,6 +141,7 @@ export async function searchWithReranking(options: {
     metadata: r.metadata,
     similarity: r.similarity,
     created_at: r.created_at,
+    parent_id: r.parent_id,
   }));
 
   // Recency slice: when time_hint is "recent", pull in latest thoughts
@@ -173,9 +172,8 @@ export async function searchWithReranking(options: {
   if (top3.length > 0) {
     const top3Ids = top3.map((t) => t.id);
 
-    // Fetch parents for thoughts that have parent_id in metadata
     const parentIds = top3
-      .map((t) => t.metadata?.parent_id as string | undefined)
+      .map((t) => t.parent_id)
       .filter(Boolean) as string[];
 
     const [childrenResult, parentsResult] = await Promise.all([
@@ -208,7 +206,7 @@ export async function searchWithReranking(options: {
 
     for (const thought of reranked) {
       const thread: Array<{ content: string; created_at: string }> = [];
-      const parentId = thought.metadata?.parent_id as string | undefined;
+      const parentId = thought.parent_id;
       if (parentId && parentMap.has(parentId)) {
         thread.push(parentMap.get(parentId)!);
       }

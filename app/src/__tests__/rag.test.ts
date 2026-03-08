@@ -29,6 +29,7 @@ function makeThought(overrides: Partial<RetrievedThought> = {}): any {
     metadata: overrides.metadata || { type: "observation", topics: ["test"], people: [] },
     similarity: overrides.similarity ?? 0.8,
     created_at: overrides.created_at || new Date().toISOString(),
+    parent_id: overrides.parent_id || null,
   };
 }
 
@@ -48,9 +49,9 @@ describe("searchWithReranking", () => {
     expect(mockGenerateEmbedding).toHaveBeenCalledWith("test query");
     // First call is match_thoughts
     expect(mockQuery.mock.calls[0][0]).toContain("match_thoughts");
-    // threshold=0.25, poolSize=15 by default
+    // threshold=0.25, poolSize=max(limit*2, 15)=20 by default
     expect(mockQuery.mock.calls[0][1]![1]).toBe(0.25);
-    expect(mockQuery.mock.calls[0][1]![2]).toBe(15);
+    expect(mockQuery.mock.calls[0][1]![2]).toBe(20);
     expect(result.thoughts).toHaveLength(1);
     expect(result.diagnostics.candidateCount).toBe(1);
   });

@@ -49,7 +49,8 @@ RETURNS TABLE (
     content    TEXT,
     metadata   JSONB,
     similarity float,
-    created_at TIMESTAMPTZ
+    created_at TIMESTAMPTZ,
+    parent_id  UUID
 )
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -59,7 +60,8 @@ BEGIN
         t.content,
         t.metadata,
         (1 - (t.embedding <=> query_embedding))::float AS similarity,
-        t.created_at
+        t.created_at,
+        t.parent_id
     FROM thoughts t
     WHERE
         t.deleted_at IS NULL
