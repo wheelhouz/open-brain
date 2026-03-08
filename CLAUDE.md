@@ -31,6 +31,6 @@ Run tests with `make test`. Tests mock the database and external APIs — no run
 
 # Deployment
 
-When asked to deploy, always commit and push all changes first, then run `make deploy`. This builds the image, pushes to GHCR (`ghcr.io/wheelhouz/open-brain`), and redeploys via Portainer.
+When asked to deploy, always commit and push all changes first, then run `make deploy ENV=prod`. This builds the image, pushes to GHCR (`ghcr.io/wheelhouz/open-brain`), and redeploys via Portainer.
 
 For a clean rebuild (no Docker cache): `docker compose -p open-brain-prod --env-file .env.prod build --no-cache` then `make push ENV=prod`.
