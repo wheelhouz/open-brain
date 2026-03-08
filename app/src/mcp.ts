@@ -1,9 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { query } from "./db.js";
-import { generateEmbedding, chatCompletion } from "./openrouter.js";
+import { chatCompletion } from "./openrouter.js";
 import { capturePipeline } from "./pipeline.js";
-import pgvector from "pgvector";
+import { searchWithReranking } from "./rag.js";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -39,24 +39,28 @@ export function createMcpServer(): McpServer {
   // search_thoughts
   server.tool(
     "search_thoughts",
-    "Search thoughts by semantic similarity to a natural language query.",
+    "Search thoughts by semantic similarity to a natural language query. Retrieves a wider candidate pool and reranks by relevance, recency, and metadata overlap.",
     {
       query: z.string().describe("Natural language search query"),
       limit: z.number().default(10).describe("Max results to return"),
-      threshold: z.number().default(0.5).describe("Minimum similarity score (0-1)"),
+      threshold: z.number().default(0.25).describe("Minimum similarity score (0-1)"),
+      filter: z.record(z.unknown()).default({}).describe("Metadata filter, e.g. {people: ['Liz']}"),
+      time_hint: z.enum(["recent", "last_month", "older"]).optional().describe("Temporal bias for reranking"),
     },
-    async ({ query: searchQuery, limit, threshold }) => {
-      const embedding = await generateEmbedding(searchQuery);
-      const result = await query(
-        `SELECT * FROM match_thoughts($1, $2, $3, $4)`,
-        [pgvector.toSql(embedding), threshold, Math.min(limit, 100), "{}"],
-      );
+    async ({ query: searchQuery, limit, threshold, filter, time_hint }) => {
+      const result = await searchWithReranking({
+        query: searchQuery,
+        limit: Math.min(limit, 100),
+        threshold,
+        filter,
+        timeHint: time_hint,
+      });
 
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result.rows, null, 2),
+            text: JSON.stringify(result.thoughts, null, 2),
           },
         ],
       };

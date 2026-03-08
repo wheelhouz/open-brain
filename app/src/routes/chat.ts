@@ -1,35 +1,20 @@
 import { Hono } from "hono";
-import { query } from "../db.js";
-import { generateEmbedding, chatCompletionStream } from "../openrouter.js";
+import { chatCompletionStream } from "../openrouter.js";
 import type { ChatMessage } from "../openrouter.js";
-import pgvector from "pgvector";
+import { retrieveContext, formatContext } from "../rag.js";
 
 export const chatRouter = new Hono();
 
-const SYSTEM_PROMPT = `You are a helpful assistant with access to the user's personal knowledge base called "Open Brain". You answer questions by drawing on the relevant thoughts provided below as context.
+const SYSTEM_PROMPT = `You are a helpful assistant with access to the user's personal knowledge base called "Open Brain".
 
 Guidelines:
-- Reference specific thoughts when they're relevant to your answer
-- If the context doesn't contain enough information, say so honestly
+- Reference specific thoughts when they support your answer
+- Distinguish between what the context directly states and what you're inferring
+- Mention dates when they're relevant to the answer
+- If the context is suggestive but not conclusive, say so
+- If no relevant context was found, be honest about it
 - Be concise but thorough
 - Use markdown formatting for readability`;
-
-function buildSystemPrompt(
-  thoughts: Array<{ id: string; content: string; similarity: number }>,
-): string {
-  if (thoughts.length === 0) {
-    return `${SYSTEM_PROMPT}\n\nNo relevant thoughts were found in the knowledge base for this query.`;
-  }
-
-  const context = thoughts
-    .map(
-      (t, i) =>
-        `[Thought ${i + 1}] (similarity: ${(t.similarity * 100).toFixed(0)}%)\n${t.content}`,
-    )
-    .join("\n\n");
-
-  return `${SYSTEM_PROMPT}\n\n--- Retrieved Thoughts ---\n${context}\n--- End of Retrieved Thoughts ---`;
-}
 
 chatRouter.post("/", async (c) => {
   const body = await c.req.json<{
@@ -45,23 +30,19 @@ chatRouter.post("/", async (c) => {
     return c.json({ error: "at least one user message is required" }, 400);
   }
 
-  // RAG: embed the last user message and retrieve relevant thoughts
-  const embedding = await generateEmbedding(lastUserMsg.content);
-  const result = await query(`SELECT * FROM match_thoughts($1, $2, $3, $4)`, [
-    pgvector.toSql(embedding),
-    0.3,
-    6,
-    JSON.stringify({}),
-  ]);
+  // RAG: rewrite query from conversation context, retrieve and rerank
+  const ragContext = await retrieveContext(body.messages);
 
-  const sources = result.rows.map((r: any) => ({
-    id: r.id,
-    content: r.content.slice(0, 200),
-    similarity: r.similarity,
+  const sources = ragContext.thoughts.map((t) => ({
+    id: t.id,
+    content: t.content.slice(0, 200),
+    similarity: t.similarity,
   }));
 
   // Build messages for the LLM
-  const systemPrompt = buildSystemPrompt(result.rows as any);
+  const contextBlock = formatContext(ragContext.thoughts);
+  const systemPrompt = `${SYSTEM_PROMPT}\n\n--- Retrieved Thoughts ---\n${contextBlock}\n--- End of Retrieved Thoughts ---`;
+
   const llmMessages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...body.messages.map((m) => ({
