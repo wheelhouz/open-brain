@@ -152,6 +152,59 @@ export function chatCompletionStream(
   });
 }
 
+export interface QueryRewrite {
+  search_query: string;
+  filter: Record<string, unknown>;
+  time_hint: "recent" | "last_month" | "older" | null;
+}
+
+const REWRITE_PROMPT = `You rewrite conversational queries into standalone search queries for a personal knowledge base.
+
+Given the recent conversation, produce JSON:
+{
+  "search_query": "standalone query capturing what the user wants, with conversation context resolved",
+  "filter": {},
+  "time_hint": null
+}
+
+Rules:
+- "filter" supports "topics": [...] and "people": [...]. Extract names into "people" whenever a person's name appears in the query (e.g. "What did Liz say?" → "people": ["Liz"]). Extract subject keywords into "topics" when the user asks about a specific subject (e.g. "thoughts on architecture" → "topics": ["architecture"]). Leave empty only when no names or clear subjects are present.
+- "time_hint" is "recent", "last_month", "older", or null. Only set if user clearly references time.
+- "search_query" must be self-contained — do not use pronouns referring to earlier messages.`;
+
+export async function rewriteQuery(
+  messages: Array<{ role: string; content: string }>,
+): Promise<QueryRewrite> {
+  const last5 = messages.slice(-5);
+  const lastUserMsg = [...last5].reverse().find((m) => m.role === "user");
+  const fallback: QueryRewrite = {
+    search_query: lastUserMsg?.content || "",
+    filter: {},
+    time_hint: null,
+  };
+
+  try {
+    const data = (await openrouterRequest("/chat/completions", {
+      model: config.extractionModel,
+      messages: [
+        { role: "system", content: REWRITE_PROMPT },
+        ...last5,
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0,
+    })) as { choices: Array<{ message: { content: string } }> };
+
+    const raw = JSON.parse(data.choices[0].message.content);
+    return {
+      search_query: raw.search_query || fallback.search_query,
+      filter: raw.filter && typeof raw.filter === "object" ? raw.filter : {},
+      time_hint: ["recent", "last_month", "older"].includes(raw.time_hint) ? raw.time_hint : null,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export async function extractMetadata(content: string): Promise<ThoughtMetadata> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,

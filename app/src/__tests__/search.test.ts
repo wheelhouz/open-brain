@@ -62,16 +62,22 @@ describe("POST /search", () => {
 
   it("enforces max limit of 100", async () => {
     mockEmbedding.mockResolvedValue(new Array(1536).fill(0));
-    mockQuery.mockResolvedValue({ rows: [] });
+    const thoughts = Array.from({ length: 150 }, (_, i) => ({
+      id: `uuid-${i}`,
+      content: `Thought ${i}`,
+      metadata: { type: "observation" },
+      similarity: 0.9 - i * 0.001,
+      created_at: new Date().toISOString(),
+    }));
+    mockQuery.mockResolvedValue({ rows: thoughts });
 
-    await app.request("/api/search", {
+    const res = await app.request("/api/search", {
       method: "POST",
       headers: { ...AUTH, "Content-Type": "application/json" },
       body: JSON.stringify({ query: "test", limit: 500 }),
     });
 
-    // The third arg in the query params should be 100 (clamped)
-    const queryParams = mockQuery.mock.calls[0][1];
-    expect(queryParams[2]).toBe(100);
+    const body = await res.json();
+    expect(body.results.length).toBeLessThanOrEqual(100);
   });
 });
