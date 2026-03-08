@@ -148,25 +148,29 @@ export function StreamView(_props: RoutableProps) {
 
   // Mobile infinite scroll via IntersectionObserver
   const loadingMoreRef = useRef(false);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<IntersectionObserver | null>(null);
   const loadThoughtsRef = useRef(loadThoughts);
   loadThoughtsRef.current = loadThoughts;
 
-  useEffect(() => {
-    if (!sentinelRef.current) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          loadThoughtsRef.current(false);
-        }
-      },
-      { rootMargin: "0px 0px 200px 0px" },
-    );
-
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore]);
+  // Callback ref: fires when sentinel mounts/unmounts, avoiding timing issues
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+    if (node) {
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) {
+            loadThoughtsRef.current(false);
+          }
+        },
+        { rootMargin: "0px 0px 200px 0px" },
+      );
+      observer.observe(node);
+      observerRef.current = observer;
+    }
+  }, []);
 
   const groups = groupByDate(thoughts);
 
