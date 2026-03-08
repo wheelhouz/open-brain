@@ -44,7 +44,7 @@ export function createMcpServer(): McpServer {
       query: z.string().describe("Natural language search query"),
       limit: z.number().default(10).describe("Max results to return"),
       threshold: z.number().default(0.25).describe("Minimum similarity score (0-1)"),
-      filter: z.record(z.unknown()).default({}).describe("Metadata filter, e.g. {people: ['Liz']}"),
+      filter: z.record(z.string(), z.unknown()).default({}).describe("Metadata filter, e.g. {people: ['Liz']}"),
       time_hint: z.enum(["recent", "last_month", "older"]).optional().describe("Temporal bias for reranking"),
     },
     async ({ query: searchQuery, limit, threshold, filter, time_hint }) => {

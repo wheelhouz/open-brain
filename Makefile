@@ -72,6 +72,7 @@ logs:
 	$(COMPOSE) logs -f app
 
 test:
+	cd app && npx tsc --noEmit
 	cd app && BRAIN_ACCESS_KEY=test DATABASE_URL=postgres://x OPENROUTER_API_KEY=x npm test
 
 clean:
