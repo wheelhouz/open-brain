@@ -27,9 +27,12 @@ export function StreamView(_props: RoutableProps) {
 
   const loadThoughts = useCallback(
     async (reset = false) => {
+      if (!reset && loadingMoreRef.current) return;
       const isMore = !reset && cursor;
-      if (isMore) setLoadingMore(true);
-      else setLoading(true);
+      if (isMore) {
+        loadingMoreRef.current = true;
+        setLoadingMore(true);
+      } else setLoading(true);
 
       try {
         const res = await api.thoughts({
@@ -53,6 +56,7 @@ export function StreamView(_props: RoutableProps) {
       } finally {
         setLoading(false);
         setLoadingMore(false);
+        loadingMoreRef.current = false;
       }
     },
     [type, topic, person, days, cursor],
@@ -143,6 +147,7 @@ export function StreamView(_props: RoutableProps) {
   );
 
   // Mobile infinite scroll via IntersectionObserver
+  const loadingMoreRef = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadThoughtsRef = useRef(loadThoughts);
   loadThoughtsRef.current = loadThoughts;
@@ -161,7 +166,7 @@ export function StreamView(_props: RoutableProps) {
 
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, loadingMore]);
+  }, [hasMore]);
 
   const groups = groupByDate(thoughts);
 
