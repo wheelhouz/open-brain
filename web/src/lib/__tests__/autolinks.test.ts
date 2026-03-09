@@ -81,7 +81,7 @@ describe("autoLink", () => {
 
     it("handles URL with query params", () => {
       const result = autoLink("see example.com/search?q=test&page=1");
-      expect(result).toContain('href="https://example.com/search?q=test&page=1"');
+      expect(result).toContain('href="https://example.com/search?q=test&amp;page=1"');
     });
   });
 
