@@ -1,4 +1,5 @@
 import { marked } from "marked";
+import { autoLink } from "./autolinks.js";
 
 // Lazy-loaded highlight.js
 let hljs: typeof import("highlight.js/lib/core").default | null = null;
@@ -82,7 +83,7 @@ renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
 marked.use({ renderer });
 
 export function renderMarkdown(content: string): string {
-  return marked.parse(content) as string;
+  return marked.parse(autoLink(content)) as string;
 }
 
 export function plainTextPreview(content: string, maxLines = 3): string {

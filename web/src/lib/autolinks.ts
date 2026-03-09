@@ -11,7 +11,7 @@ const TLDS = new Set([
 const ABBREVS = new Set(["e.g", "i.e", "etc", "vs", "vol", "dept", "govt"]);
 
 const URL_RE =
-  /https?:\/\/[^\s)\]>,;!?"']+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z]{2,})(?:\/[^\s)\]>,;!?"']*)?/gi;
+  /https?:\/\/[^\s)\]>,;!"']+|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+([a-z]{2,})(?:\/[^\s)\]>,;!"']*)?/gi;
 
 /** Protect code blocks, inline code, and markdown links from transformation */
 const PROTECTED_RE = /```[\s\S]*?```|`[^`]+`|\[[^\]]*\]\([^)]*\)/g;

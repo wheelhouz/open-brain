@@ -59,6 +59,32 @@ describe("autoLink", () => {
     });
   });
 
+  describe("edge cases", () => {
+    it("handles multiple links in one line", () => {
+      const result = autoLink("compare github.com/a/b and github.com/c/d");
+      expect(result).toContain("a/b");
+      expect(result).toContain("c/d");
+      expect((result.match(/auto-link-gh/g) || []).length).toBe(4); // 2 links x 2 (class + icon class)
+    });
+
+    it("handles mixed github and generic links", () => {
+      const result = autoLink("see github.com/foo/bar and danshapiro.com");
+      expect(result).toContain('class="auto-link-gh"');
+      expect(result).toContain('href="https://danshapiro.com"');
+    });
+
+    it("does not double-link already-linked URLs in markdown", () => {
+      const input = "[repo](https://github.com/foo/bar)";
+      const result = autoLink(input);
+      expect(result).toBe(input);
+    });
+
+    it("handles URL with query params", () => {
+      const result = autoLink("see example.com/search?q=test&page=1");
+      expect(result).toContain('href="https://example.com/search?q=test&page=1"');
+    });
+  });
+
   describe("GitHub links", () => {
     it("renders repo as chip", () => {
       const result = autoLink("check github.com/foo/bar");
