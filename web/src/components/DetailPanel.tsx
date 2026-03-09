@@ -165,9 +165,14 @@ export function DetailPanel() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       if (editing) return;
-      if (e.key === "f") {
+      if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setFullscreen((f) => !f);
+      }
+      if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        close();
+        return;
       }
       if (e.key === "Escape" && fullscreen) {
         e.stopPropagation();
