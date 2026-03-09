@@ -58,4 +58,40 @@ describe("autoLink", () => {
       );
     });
   });
+
+  describe("GitHub links", () => {
+    it("renders repo as chip", () => {
+      const result = autoLink("check github.com/foo/bar");
+      expect(result).toContain('class="auto-link-gh"');
+      expect(result).toContain("foo/bar");
+      expect(result).toContain('href="https://github.com/foo/bar"');
+    });
+
+    it("renders issue as chip with #", () => {
+      const result = autoLink("see github.com/foo/bar/issues/123");
+      expect(result).toContain("foo/bar#123");
+    });
+
+    it("renders PR as chip with !", () => {
+      const result = autoLink("see github.com/foo/bar/pull/42");
+      expect(result).toContain("foo/bar!42");
+    });
+
+    it("renders commit as chip with @short-hash", () => {
+      const result = autoLink("see github.com/foo/bar/commit/abc123def456");
+      expect(result).toContain("foo/bar@abc123d");
+    });
+
+    it("handles explicit https github URL", () => {
+      const result = autoLink("see https://github.com/foo/bar/issues/99");
+      expect(result).toContain('class="auto-link-gh"');
+      expect(result).toContain("foo/bar#99");
+    });
+
+    it("handles github.com with no path as generic link", () => {
+      const result = autoLink("visit github.com");
+      expect(result).not.toContain('class="auto-link-gh"');
+      expect(result).toContain('href="https://github.com"');
+    });
+  });
 });
