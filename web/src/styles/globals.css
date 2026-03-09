@@ -125,6 +125,32 @@ code:not(pre code) {
   color: var(--text-secondary);
 }
 .markdown-content a { color: var(--accent); text-decoration: underline; }
+/* Auto-linked GitHub chips */
+.markdown-content .auto-link-gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.125em 0.5em;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 0.875em;
+  font-weight: 500;
+  line-height: 1.6;
+  vertical-align: baseline;
+  transition: background 0.15s;
+}
+.markdown-content .auto-link-gh:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+.auto-link-gh-icon {
+  width: 0.875em;
+  height: 0.875em;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
 .markdown-content table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
 .markdown-content th, .markdown-content td {
   border: 1px solid var(--border-color);
