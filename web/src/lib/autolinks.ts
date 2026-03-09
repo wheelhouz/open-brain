@@ -29,25 +29,16 @@ export function autoLink(text: string): string {
   });
 
   // Replace URLs
-  working = working.replace(URL_RE, (match, tld, offset) => {
+  working = working.replace(URL_RE, (match) => {
     // Strip trailing punctuation that's likely sentence-ending
     let trailing = "";
     const trailMatch = match.match(/[.)]+$/);
     if (trailMatch) {
-      const trail = trailMatch[0];
-      // For balanced parens, only strip if unbalanced
-      let stripped = trail;
       // Count open/close parens in match to handle balanced parens
       const openCount = (match.match(/\(/g) || []).length;
       const closeCount = (match.match(/\)/g) || []).length;
       if (closeCount > openCount) {
-        // Strip excess closing parens
-        const excess = closeCount - openCount;
-        const trailParens = (trail.match(/\)/g) || []).length;
-        const parensToStrip = Math.min(excess, trailParens);
-        // Rebuild: strip trailing periods and excess parens
-        stripped = trail;
-        // Simple approach: strip one trailing char at a time if it's ) or .
+        // Strip trailing periods and excess closing parens
         let url = match;
         trailing = "";
         while (url.length > 0) {
@@ -64,7 +55,7 @@ export function autoLink(text: string): string {
           }
         }
         match = url;
-      } else if (trail === ".") {
+      } else if (trailMatch[0] === ".") {
         trailing = ".";
         match = match.slice(0, -1);
       }
@@ -83,10 +74,7 @@ export function autoLink(text: string): string {
 
       if (!TLDS.has(matchedTld)) return match + trailing;
 
-      // Check for abbreviations: look at the text before the match
-      const before = working.slice(0, offset);
       // Check if this looks like an abbreviation (e.g., i.e., etc.)
-      // The abbrev pattern: the part before the TLD dot
       const domainWithoutTld = match.split("/")[0];
       const domainParts = domainWithoutTld.split(".");
       // Check each prefix segment as potential abbreviation
