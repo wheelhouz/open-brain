@@ -19,20 +19,26 @@ function useVisualViewport() {
       ? window.visualViewport.height
       : null,
   );
+  const [offsetTop, setOffsetTop] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const onResize = () => {
+    const onUpdate = () => {
       setHeight(vv.height);
+      setOffsetTop(vv.offsetTop);
       setKeyboardOpen(window.innerHeight - vv.height > KEYBOARD_THRESHOLD);
     };
-    vv.addEventListener("resize", onResize);
-    return () => vv.removeEventListener("resize", onResize);
+    vv.addEventListener("resize", onUpdate);
+    vv.addEventListener("scroll", onUpdate);
+    return () => {
+      vv.removeEventListener("resize", onUpdate);
+      vv.removeEventListener("scroll", onUpdate);
+    };
   }, []);
 
-  return { height, keyboardOpen };
+  return { height, offsetTop, keyboardOpen };
 }
 
 export function BottomSheet({ children, onClose, size = "full", blur = true }: BottomSheetProps) {
@@ -44,7 +50,7 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
   const startY = useRef(0);
   const tracking = useRef(false);
   const fromGripper = useRef(false);
-  const { height: vvHeight, keyboardOpen } = useVisualViewport();
+  const { height: vvHeight, offsetTop: vvOffsetTop, keyboardOpen } = useVisualViewport();
 
   const onTouchStart = useCallback((e: TouchEvent) => {
     const sheet = sheetRef.current;
@@ -119,7 +125,8 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
 
   return (
     <div
-      class={`fixed inset-0 z-50 flex flex-col ${kbMode ? "justify-start" : "justify-end"} animate-[fadeIn_0.15s_ease-out]`}
+      class={`fixed inset-0 z-50 flex flex-col justify-end animate-[fadeIn_0.15s_ease-out]`}
+      style={kbMode ? { top: `${vvOffsetTop}px`, height: `${vvHeight}px`, bottom: "auto" } : undefined}
       onClick={onClose}
     >
       <div class={`absolute inset-0 bg-black/50 ${blur ? "backdrop-blur-sm" : ""}`} />
@@ -128,7 +135,7 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
         class={`bottom-sheet relative bg-[var(--bg-primary)] overscroll-contain overflow-y-auto ${!kbMode ? "safe-bottom" : ""} ${roundCorners ? "rounded-t-2xl" : ""} ${dismissing ? "sheet-dismissing" : ""}`}
         style={{
           maxHeight: kbMode
-            ? `${vvHeight}px`
+            ? "100%"
             : snappedFull
               ? "100dvh"
               : size === "half"
