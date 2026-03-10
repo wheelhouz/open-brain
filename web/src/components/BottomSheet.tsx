@@ -57,6 +57,9 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
     if (!sheet) return;
     // Only allow drag when scrolled to top
     if (sheet.scrollTop > 0) return;
+    // Let textareas handle their own scrolling
+    const target = e.target as HTMLElement;
+    if (target.closest("textarea")) return;
     startY.current = e.touches[0].clientY;
     tracking.current = true;
     // Check if touch started on the gripper
