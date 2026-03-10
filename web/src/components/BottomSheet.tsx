@@ -11,22 +11,28 @@ interface BottomSheetProps {
 const DISMISS_THRESHOLD = 80;
 const SNAP_UP_THRESHOLD = 40;
 
+const KEYBOARD_THRESHOLD = 150;
+
 function useVisualViewport() {
   const [height, setHeight] = useState<number | null>(
     typeof window !== "undefined" && window.visualViewport
       ? window.visualViewport.height
       : null,
   );
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
 
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const onResize = () => setHeight(vv.height);
+    const onResize = () => {
+      setHeight(vv.height);
+      setKeyboardOpen(window.innerHeight - vv.height > KEYBOARD_THRESHOLD);
+    };
     vv.addEventListener("resize", onResize);
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
-  return height;
+  return { height, keyboardOpen };
 }
 
 export function BottomSheet({ children, onClose, size = "full", blur = true }: BottomSheetProps) {
@@ -38,7 +44,7 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
   const startY = useRef(0);
   const tracking = useRef(false);
   const fromGripper = useRef(false);
-  const vvHeight = useVisualViewport();
+  const { height: vvHeight, keyboardOpen } = useVisualViewport();
 
   const onTouchStart = useCallback((e: TouchEvent) => {
     const sheet = sheetRef.current;
@@ -108,23 +114,28 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
 
   const isDragging = tracking.current && dragY !== 0;
 
+  const kbMode = keyboardOpen && vvHeight != null;
+  const roundCorners = !snappedFull && !kbMode;
+
   return (
     <div
-      class="fixed inset-0 z-50 flex flex-col justify-end animate-[fadeIn_0.15s_ease-out]"
+      class={`fixed inset-0 z-50 flex flex-col ${kbMode ? "justify-start" : "justify-end"} animate-[fadeIn_0.15s_ease-out]`}
       onClick={onClose}
     >
       <div class={`absolute inset-0 bg-black/50 ${blur ? "backdrop-blur-sm" : ""}`} />
       <div
         ref={sheetRef}
-        class={`bottom-sheet relative bg-[var(--bg-primary)] overscroll-contain safe-bottom overflow-y-auto ${!snappedFull ? "rounded-t-2xl" : ""} ${dismissing ? "sheet-dismissing" : ""}`}
+        class={`bottom-sheet relative bg-[var(--bg-primary)] overscroll-contain overflow-y-auto ${!kbMode ? "safe-bottom" : ""} ${roundCorners ? "rounded-t-2xl" : ""} ${dismissing ? "sheet-dismissing" : ""}`}
         style={{
-          maxHeight: snappedFull
-            ? "100dvh"
-            : size === "half"
-              ? "50dvh"
-              : vvHeight != null
-                ? `${Math.min(vvHeight * 0.85, vvHeight)}px`
-                : "85dvh",
+          maxHeight: kbMode
+            ? `${vvHeight}px`
+            : snappedFull
+              ? "100dvh"
+              : size === "half"
+                ? "50dvh"
+                : vvHeight != null
+                  ? `${Math.min(vvHeight * 0.85, vvHeight)}px`
+                  : "85dvh",
           transform: dragY !== 0 ? `translateY(${dragY > 0 ? dragY : dragY * 0.5}px)` : undefined,
           transition: isDragging ? "none" : "transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), max-height 0.3s cubic-bezier(0.25, 1, 0.5, 1), border-radius 0.2s ease",
         }}
@@ -134,7 +145,7 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
         onTouchEnd={onTouchEnd}
       >
         {/* Drag handle */}
-        <div ref={gripperRef} class={`sticky top-0 z-10 flex justify-center pt-3 pb-2 bg-[var(--bg-primary)] ${!snappedFull ? "rounded-t-2xl" : ""}`}>
+        <div ref={gripperRef} class={`sticky top-0 z-10 flex justify-center pt-3 pb-2 bg-[var(--bg-primary)] ${roundCorners ? "rounded-t-2xl" : ""}`}>
           <div class="w-10 h-1 rounded-full bg-[var(--border-color)]" />
         </div>
         {children}
