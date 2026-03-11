@@ -205,9 +205,23 @@ export async function rewriteQuery(
   }
 }
 
+function buildInputLookup(topics: string[]): Map<string, string> {
+  const lookup = new Map<string, string>();
+  for (const t of topics) lookup.set(t.toLowerCase().trim(), t);
+  return lookup;
+}
+
+function matchTopics(aiTopics: string[], inputLookup: Map<string, string>): string[] {
+  return aiTopics
+    .map((t) => inputLookup.get(t.toLowerCase().trim()))
+    .filter((t): t is string => t !== undefined);
+}
+
 export async function categorizeTopics(
   topics: string[],
 ): Promise<{ name: string; topics: string[] }[]> {
+  const inputLookup = buildInputLookup(topics);
+
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
     messages: [
@@ -222,13 +236,16 @@ export async function categorizeTopics(
 
   const raw = JSON.parse(data.choices[0].message.content);
   return Array.isArray(raw.categories)
-    ? raw.categories.filter(
-        (c: unknown): c is { name: string; topics: string[] } =>
-          typeof c === "object" &&
-          c !== null &&
-          typeof (c as Record<string, unknown>).name === "string" &&
-          Array.isArray((c as Record<string, unknown>).topics),
-      )
+    ? raw.categories
+        .filter(
+          (c: unknown): c is { name: string; topics: string[] } =>
+            typeof c === "object" &&
+            c !== null &&
+            typeof (c as Record<string, unknown>).name === "string" &&
+            Array.isArray((c as Record<string, unknown>).topics),
+        )
+        .map((c: { name: string; topics: string[] }) => ({ name: c.name, topics: matchTopics(c.topics, inputLookup) }))
+        .filter((c: { topics: string[] }) => c.topics.length > 0)
     : [];
 }
 
@@ -236,6 +253,8 @@ export async function categorizeMissing(
   topics: string[],
   existingCategories: string[],
 ): Promise<{ name: string; topics: string[] }[]> {
+  const inputLookup = buildInputLookup(topics);
+
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
     messages: [
@@ -250,13 +269,16 @@ export async function categorizeMissing(
 
   const raw = JSON.parse(data.choices[0].message.content);
   return Array.isArray(raw.categories)
-    ? raw.categories.filter(
-        (c: unknown): c is { name: string; topics: string[] } =>
-          typeof c === "object" &&
-          c !== null &&
-          typeof (c as Record<string, unknown>).name === "string" &&
-          Array.isArray((c as Record<string, unknown>).topics),
-      )
+    ? raw.categories
+        .filter(
+          (c: unknown): c is { name: string; topics: string[] } =>
+            typeof c === "object" &&
+            c !== null &&
+            typeof (c as Record<string, unknown>).name === "string" &&
+            Array.isArray((c as Record<string, unknown>).topics),
+        )
+        .map((c: { name: string; topics: string[] }) => ({ name: c.name, topics: matchTopics(c.topics, inputLookup) }))
+        .filter((c: { topics: string[] }) => c.topics.length > 0)
     : [];
 }
 

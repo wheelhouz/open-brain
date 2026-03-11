@@ -176,29 +176,36 @@ topicsRouter.post("/categorize", async (c) => {
   // Pass 1: bulk AI categorization
   const pass1 = await categorizeTopics(topics);
 
-  // Pass 2: sweep stragglers
-  const assignedInPass1 = new Set(pass1.flatMap((cat) => cat.topics));
-  const missingTopics = topics.filter((t) => !assignedInPass1.has(t));
+  const merged = new Map<string, string[]>(pass1.map((cat) => [cat.name, [...cat.topics]]));
+  const allAssigned = new Set(pass1.flatMap((cat) => cat.topics));
 
+  // Retry loop for stragglers (max 3 sweeps)
   let swept = 0;
-  let allCategories = pass1;
-  if (missingTopics.length > 0) {
-    const pass1Names = pass1.map((cat) => cat.name);
-    const pass2 = await categorizeMissing(missingTopics, pass1Names);
+  for (let i = 0; i < 3; i++) {
+    const missing = topics.filter((t) => !allAssigned.has(t));
+    if (missing.length === 0) break;
 
-    // Merge pass 2 into pass 1 results
-    const merged = new Map(pass1.map((cat) => [cat.name, [...cat.topics]]));
-    for (const cat of pass2) {
+    const categoryNames = [...merged.keys()];
+    const pass = await categorizeMissing(missing, categoryNames);
+    for (const cat of pass) {
+      for (const t of cat.topics) allAssigned.add(t);
       const existing = merged.get(cat.name);
-      if (existing) {
-        existing.push(...cat.topics);
-      } else {
-        merged.set(cat.name, [...cat.topics]);
-      }
+      if (existing) existing.push(...cat.topics);
+      else merged.set(cat.name, [...cat.topics]);
     }
-    allCategories = [...merged.entries()].map(([name, topics]) => ({ name, topics }));
-    swept = missingTopics.length;
+    swept += missing.length - topics.filter((t) => !allAssigned.has(t)).length;
   }
+
+  // Fallback: force-assign any still-missing topics
+  const stillMissing = topics.filter((t) => !allAssigned.has(t));
+  if (stillMissing.length > 0) {
+    const other = merged.get("Other");
+    if (other) other.push(...stillMissing);
+    else merged.set("Other", stillMissing);
+    swept += stillMissing.length;
+  }
+
+  const allCategories = [...merged.entries()].map(([name, t]) => ({ name, topics: t }));
 
   // Delete all + insert complete set
   await query("DELETE FROM topic_categories");
