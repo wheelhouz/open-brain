@@ -26,6 +26,16 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_metadata
     ON thoughts
     USING gin (metadata jsonb_path_ops);
 
+-- Topic categories (AI-generated groupings)
+CREATE TABLE IF NOT EXISTS topic_categories (
+    topic       TEXT PRIMARY KEY,
+    category    TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_topic_categories_category
+    ON topic_categories(category);
+
 -- Migrations (idempotent, safe to re-run)
 ALTER TABLE thoughts ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES thoughts(id);
 

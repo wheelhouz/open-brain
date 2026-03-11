@@ -67,6 +67,7 @@ export interface TopicEntry {
   topic: string;
   count: number;
   last_seen: string;
+  category: string;
 }
 
 export interface PersonEntry {
@@ -166,7 +167,14 @@ export const api = {
 
   stats: () => request<StatsResponse>("/api/stats"),
 
-  topics: () => request<{ topics: TopicEntry[] }>("/api/topics"),
+  topics: () => request<{ topics: TopicEntry[]; categories: string[] }>("/api/topics"),
+
+  categorizeTopics: () =>
+    request<{ categories: string[]; assigned: number }>("/api/topics/categorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
 
   people: () => request<{ people: PersonEntry[] }>("/api/people"),
 

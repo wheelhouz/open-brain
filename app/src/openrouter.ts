@@ -205,6 +205,53 @@ export async function rewriteQuery(
   }
 }
 
+export async function categorizeTopics(
+  topics: string[],
+): Promise<{ name: string; topics: string[] }[]> {
+  const data = (await openrouterRequest("/chat/completions", {
+    model: config.extractionModel,
+    messages: [
+      {
+        role: "user",
+        content: `Group these topics into 5-10 high-level categories. Each topic must appear in exactly one category.\n\nTopics:\n${topics.map((t) => `- ${t}`).join("\n")}\n\nRespond with JSON: { "categories": [{ "name": "Category Name", "topics": ["topic1", "topic2"] }] }`,
+      },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0,
+  })) as { choices: Array<{ message: { content: string } }> };
+
+  const raw = JSON.parse(data.choices[0].message.content);
+  return Array.isArray(raw.categories)
+    ? raw.categories.filter(
+        (c: unknown): c is { name: string; topics: string[] } =>
+          typeof c === "object" &&
+          c !== null &&
+          typeof (c as Record<string, unknown>).name === "string" &&
+          Array.isArray((c as Record<string, unknown>).topics),
+      )
+    : [];
+}
+
+export async function assignCategory(
+  topic: string,
+  existingCategories: string[],
+): Promise<string> {
+  const data = (await openrouterRequest("/chat/completions", {
+    model: config.extractionModel,
+    messages: [
+      {
+        role: "user",
+        content: `Given these existing categories: ${JSON.stringify(existingCategories)}\n\nWhich category best fits the topic "${topic}"? If none fit well, suggest a new category name.\n\nRespond with JSON: { "category": "Category Name" }`,
+      },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0,
+  })) as { choices: Array<{ message: { content: string } }> };
+
+  const raw = JSON.parse(data.choices[0].message.content);
+  return typeof raw.category === "string" ? raw.category : "Uncategorized";
+}
+
 export async function extractMetadata(content: string): Promise<ThoughtMetadata> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
