@@ -170,7 +170,7 @@ export const api = {
   topics: () => request<{ topics: TopicEntry[]; categories: string[] }>("/api/topics"),
 
   categorizeTopics: () =>
-    request<{ categories: string[]; assigned: number }>("/api/topics/categorize", {
+    request<{ categories: string[]; assigned: number; swept: number }>("/api/topics/categorize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),

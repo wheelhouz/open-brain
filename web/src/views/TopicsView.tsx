@@ -247,7 +247,8 @@ export function TopicsView(props: RoutableProps & { selected?: string }) {
     setCategorizing(true);
     try {
       const result = await api.categorizeTopics();
-      showToast(`Categorized into ${result.categories.length} categories (${result.assigned} topics)`, "success");
+      const sweptMsg = result.swept > 0 ? ` (${result.swept} re-assigned in sweep)` : "";
+      showToast(`Categorized into ${result.categories.length} categories (${result.assigned} topics)${sweptMsg}`, "success");
       loadTopics();
     } catch {
       showToast("Failed to categorize topics", "error");

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
 import { config } from "../config.js";
-import { openrouterRequest, categorizeTopics } from "../openrouter.js";
+import { openrouterRequest, categorizeTopics, categorizeMissing } from "../openrouter.js";
 
 export const topicsRouter = new Hono();
 
@@ -173,14 +173,38 @@ topicsRouter.post("/categorize", async (c) => {
   const topics = topicResult.rows.map((r) => r.topic);
   if (topics.length === 0) return c.json({ categories: [], assigned: 0 });
 
-  // AI categorization
-  const result = await categorizeTopics(topics);
+  // Pass 1: bulk AI categorization
+  const pass1 = await categorizeTopics(topics);
 
-  // Upsert: delete all + insert in transaction
+  // Pass 2: sweep stragglers
+  const assignedInPass1 = new Set(pass1.flatMap((cat) => cat.topics));
+  const missingTopics = topics.filter((t) => !assignedInPass1.has(t));
+
+  let swept = 0;
+  let allCategories = pass1;
+  if (missingTopics.length > 0) {
+    const pass1Names = pass1.map((cat) => cat.name);
+    const pass2 = await categorizeMissing(missingTopics, pass1Names);
+
+    // Merge pass 2 into pass 1 results
+    const merged = new Map(pass1.map((cat) => [cat.name, [...cat.topics]]));
+    for (const cat of pass2) {
+      const existing = merged.get(cat.name);
+      if (existing) {
+        existing.push(...cat.topics);
+      } else {
+        merged.set(cat.name, [...cat.topics]);
+      }
+    }
+    allCategories = [...merged.entries()].map(([name, topics]) => ({ name, topics }));
+    swept = missingTopics.length;
+  }
+
+  // Delete all + insert complete set
   await query("DELETE FROM topic_categories");
 
   let assigned = 0;
-  for (const cat of result) {
+  for (const cat of allCategories) {
     for (const topic of cat.topics) {
       await query(
         `INSERT INTO topic_categories (topic, category, updated_at) VALUES ($1, $2, now())
@@ -191,6 +215,6 @@ topicsRouter.post("/categorize", async (c) => {
     }
   }
 
-  const categories = result.map((cat) => cat.name).sort();
-  return c.json({ categories, assigned });
+  const categories = allCategories.map((cat) => cat.name).sort();
+  return c.json({ categories, assigned, swept });
 });
