@@ -1,23 +1,44 @@
 import { useState, useEffect, useCallback, useMemo } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type TopicEntry, type Thought, type MergeCluster } from "../api";
-import { selectedThoughtId, lastDeletedId, showToast } from "../state";
+import { selectedThoughtId, lastDeletedId, showToast, theme } from "../state";
 import { TopicCloud } from "../components/TopicCloud";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { SwipeableCard } from "../components/SwipeableCard";
 import { DetailPanel } from "../components/DetailPanel";
 import { Sparkles, Pencil, X, Check, ArrowRight, Tags, Search } from "lucide-preact";
 
-const CATEGORY_PALETTE = [
-  { bg: "rgba(59, 130, 246, 0.15)", text: "#3b82f6", selected: "#2563eb" },   // blue
-  { bg: "rgba(168, 85, 247, 0.15)", text: "#a855f7", selected: "#7c3aed" },   // purple
-  { bg: "rgba(16, 185, 129, 0.15)", text: "#10b981", selected: "#059669" },    // emerald
-  { bg: "rgba(236, 72, 153, 0.15)", text: "#ec4899", selected: "#db2777" },    // pink
-  { bg: "rgba(245, 158, 11, 0.15)", text: "#f59e0b", selected: "#d97706" },    // amber
-  { bg: "rgba(99, 102, 241, 0.15)", text: "#6366f1", selected: "#4f46e5" },    // indigo
-  { bg: "rgba(244, 63, 94, 0.15)", text: "#f43f5e", selected: "#e11d48" },     // rose
-  { bg: "rgba(20, 184, 166, 0.15)", text: "#14b8a6", selected: "#0d9488" },    // teal
+// 12 perceptually distinct hues in OKLCH (~25°+ gap, hue-tuned L/C).
+// - bg: 10% alpha tint — adapts naturally to dark/light backgrounds
+// - text: mid-tone label color, lighter in dark mode for readability
+// - selected: darkened + chroma-boosted for 4.5:1+ contrast vs white (WCAG AA)
+// Dark/light text variants are resolved at render time via isDark.
+const CATEGORY_HUES = [
+  { h: 25,  ld: 0.72, ll: 0.55 }, // red
+  { h: 55,  ld: 0.75, ll: 0.52 }, // orange
+  { h: 80,  ld: 0.80, ll: 0.50 }, // amber
+  { h: 135, ld: 0.73, ll: 0.45 }, // lime
+  { h: 155, ld: 0.72, ll: 0.45 }, // green
+  { h: 185, ld: 0.72, ll: 0.45 }, // teal
+  { h: 215, ld: 0.72, ll: 0.48 }, // cyan
+  { h: 250, ld: 0.70, ll: 0.50 }, // blue
+  { h: 280, ld: 0.70, ll: 0.50 }, // indigo
+  { h: 310, ld: 0.73, ll: 0.50 }, // purple
+  { h: 340, ld: 0.73, ll: 0.52 }, // magenta
+  { h: 0,   ld: 0.72, ll: 0.52 }, // pink
 ];
+
+function buildPalette(isDark: boolean) {
+  return CATEGORY_HUES.map(({ h, ld, ll }) => {
+    const textL = isDark ? ld : ll;
+    const textC = 0.14;
+    return {
+      bg: `oklch(${textL} ${textC} ${h} / 0.10)`,
+      text: `oklch(${textL} ${textC} ${h})`,
+      selected: `oklch(${isDark ? 0.52 : 0.48} 0.16 ${h})`,
+    };
+  });
+}
 
 type CleanupState = "idle" | "scanning" | "reviewing" | "applying";
 
@@ -319,11 +340,14 @@ export function TopicsView(props: RoutableProps & { selected?: string }) {
     setAccepted(new Set());
   }, []);
 
+  const isDark = theme.value === "dark";
+  const palette = useMemo(() => buildPalette(isDark), [isDark]);
+
   const categoryColorMap = useMemo(() => {
-    const map = new Map<string, typeof CATEGORY_PALETTE[0]>();
-    categories.forEach((cat, i) => map.set(cat, CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]));
+    const map = new Map<string, typeof palette[0]>();
+    categories.forEach((cat, i) => map.set(cat, palette[i % palette.length]));
     return map;
-  }, [categories]);
+  }, [categories, palette]);
 
   const toggleSelect = useCallback((topic: string) => {
     setSelected(prev => {

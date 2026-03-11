@@ -100,7 +100,7 @@ export function TopicCloud({ topics, selected, onSelect, onRename, categoryColor
       {canCollapse && (
         <button
           onClick={() => setExpanded(!expanded)}
-          class="flex items-center gap-1 mt-3 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+          class="flex items-center gap-1 mt-3 mb-4 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
         >
           {expanded ? (
             <>
