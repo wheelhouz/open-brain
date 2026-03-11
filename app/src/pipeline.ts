@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { query } from "./db.js";
-import { generateEmbedding, extractMetadata, type ThoughtMetadata } from "./openrouter.js";
+import { generateEmbedding, extractMetadata, assignCategory, type ThoughtMetadata } from "./openrouter.js";
 import pgvector from "pgvector";
 
 export interface CaptureResult {
@@ -42,6 +42,38 @@ export async function capturePipeline(
      RETURNING id, created_at`,
     [content, pgvector.toSql(embedding), JSON.stringify(metadataWithHash), parentId || null],
   );
+
+  // Auto-categorize new topics (best-effort, don't block capture)
+  if (metadata.topics.length > 0) {
+    try {
+      const catResult = await query<{ category: string }>(
+        `SELECT DISTINCT category FROM topic_categories LIMIT 1`,
+      );
+      if (catResult.rows.length > 0) {
+        // Categories exist — assign new topics
+        const uncategorized = await query<{ topic: string }>(
+          `SELECT unnest($1::text[]) AS topic EXCEPT SELECT topic FROM topic_categories`,
+          [metadata.topics],
+        );
+        if (uncategorized.rows.length > 0) {
+          const existingCats = await query<{ category: string }>(
+            `SELECT DISTINCT category FROM topic_categories ORDER BY category`,
+          );
+          const categories = existingCats.rows.map((r) => r.category);
+          for (const row of uncategorized.rows) {
+            const category = await assignCategory(row.topic, categories);
+            await query(
+              `INSERT INTO topic_categories (topic, category) VALUES ($1, $2)
+               ON CONFLICT (topic) DO UPDATE SET category = $2, updated_at = now()`,
+              [row.topic, category],
+            );
+          }
+        }
+      }
+    } catch {
+      // Don't fail capture if categorization fails
+    }
+  }
 
   return {
     id: result.rows[0].id,

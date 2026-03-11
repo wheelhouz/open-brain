@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
 import { config } from "../config.js";
-import { openrouterRequest } from "../openrouter.js";
+import { openrouterRequest, categorizeTopics } from "../openrouter.js";
 
 export const topicsRouter = new Hono();
 
@@ -25,6 +25,18 @@ topicsRouter.patch("/:name", async (c) => {
      WHERE metadata->'topics' ? $1 AND deleted_at IS NULL`,
     [oldName, newName],
   );
+
+  // Update topic_categories: if newName already has a row, just delete the old one;
+  // otherwise rename the old row to the new topic name
+  const existing = await query(`SELECT 1 FROM topic_categories WHERE topic = $1`, [newName]);
+  if (existing.rows.length > 0) {
+    await query(`DELETE FROM topic_categories WHERE topic = $1`, [oldName]);
+  } else {
+    await query(
+      `UPDATE topic_categories SET topic = $2, updated_at = now() WHERE topic = $1`,
+      [oldName, newName],
+    );
+  }
 
   return c.json({ renamed: true, from: oldName, to: newName, affected: result.rowCount || 0 });
 });
@@ -116,6 +128,9 @@ topicsRouter.post("/merge", async (c) => {
       );
       thoughtsUpdated += result.rowCount || 0;
       applied++;
+
+      // Remove merged topic from topic_categories
+      await query(`DELETE FROM topic_categories WHERE topic = $1`, [oldName]);
     }
   }
 
@@ -123,19 +138,59 @@ topicsRouter.post("/merge", async (c) => {
 });
 
 topicsRouter.get("/", async (c) => {
-  const result = await query<{ topic: string; count: string; last_seen: string }>(
-    `SELECT topic, count(*) as count, max(t.created_at) as last_seen
-     FROM thoughts t, jsonb_array_elements_text(t.metadata->'topics') as topic
-     WHERE t.deleted_at IS NULL
-     GROUP BY topic
-     ORDER BY count DESC`,
+  const result = await query<{ topic: string; count: string; last_seen: string; category: string }>(
+    `SELECT t.topic, t.count, t.last_seen, COALESCE(tc.category, 'Uncategorized') as category
+     FROM (
+       SELECT topic, count(*) as count, max(th.created_at) as last_seen
+       FROM thoughts th, jsonb_array_elements_text(th.metadata->'topics') as topic
+       WHERE th.deleted_at IS NULL
+       GROUP BY topic
+     ) t
+     LEFT JOIN topic_categories tc ON tc.topic = t.topic
+     ORDER BY tc.category, t.count DESC`,
   );
 
-  return c.json({
-    topics: result.rows.map((r) => ({
-      topic: r.topic,
-      count: parseInt(r.count, 10),
-      last_seen: r.last_seen,
-    })),
-  });
+  const topics = result.rows.map((r) => ({
+    topic: r.topic,
+    count: parseInt(r.count, 10),
+    last_seen: r.last_seen,
+    category: r.category,
+  }));
+
+  const categories = [...new Set(topics.map((t) => t.category))].sort();
+
+  return c.json({ topics, categories });
+});
+
+topicsRouter.post("/categorize", async (c) => {
+  // Fetch all distinct topics
+  const topicResult = await query<{ topic: string }>(
+    `SELECT DISTINCT topic
+     FROM thoughts t, jsonb_array_elements_text(t.metadata->'topics') as topic
+     WHERE t.deleted_at IS NULL`,
+  );
+
+  const topics = topicResult.rows.map((r) => r.topic);
+  if (topics.length === 0) return c.json({ categories: [], assigned: 0 });
+
+  // AI categorization
+  const result = await categorizeTopics(topics);
+
+  // Upsert: delete all + insert in transaction
+  await query("DELETE FROM topic_categories");
+
+  let assigned = 0;
+  for (const cat of result) {
+    for (const topic of cat.topics) {
+      await query(
+        `INSERT INTO topic_categories (topic, category, updated_at) VALUES ($1, $2, now())
+         ON CONFLICT (topic) DO UPDATE SET category = $2, updated_at = now()`,
+        [topic, cat.name],
+      );
+      assigned++;
+    }
+  }
+
+  const categories = result.map((cat) => cat.name).sort();
+  return c.json({ categories, assigned });
 });

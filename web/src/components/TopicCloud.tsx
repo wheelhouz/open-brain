@@ -1,16 +1,20 @@
 import { useState, useRef } from "preact/hooks";
-import { Pencil } from "lucide-preact";
+import { Pencil, ChevronDown, ChevronUp } from "lucide-preact";
 import type { TopicEntry } from "../api";
+
+const COLLAPSED_LIMIT = 20;
 
 interface TopicCloudProps {
   topics: TopicEntry[];
-  selected?: string;
+  selected: Set<string>;
   onSelect: (topic: string) => void;
   onRename?: (oldName: string, newName: string) => void;
+  categoryColorMap?: Map<string, { bg: string; text: string; selected: string }>;
 }
 
-export function TopicCloud({ topics, selected, onSelect, onRename }: TopicCloudProps) {
+export function TopicCloud({ topics, selected, onSelect, onRename, categoryColorMap }: TopicCloudProps) {
   const [editing, setEditing] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   if (topics.length === 0) return null;
@@ -27,11 +31,17 @@ export function TopicCloud({ topics, selected, onSelect, onRename }: TopicCloudP
     }
   };
 
+  const canCollapse = topics.length > COLLAPSED_LIMIT;
+  const visibleTopics = canCollapse && !expanded ? topics.slice(0, COLLAPSED_LIMIT) : topics;
+  const hiddenCount = topics.length - COLLAPSED_LIMIT;
+
   return (
-    <div class="flex flex-wrap gap-2">
-      {topics.map((t) => {
+    <div>
+      <div class="flex flex-wrap gap-2.5">
+      {visibleTopics.map((t) => {
         const scale = minSize + ((t.count / maxCount) * (maxSize - minSize));
-        const isSelected = selected === t.topic;
+        const isSelected = selected.has(t.topic);
+        const catColor = categoryColorMap?.get(t.category);
         const isEditing = editing === t.topic;
 
         if (isEditing) {
@@ -56,13 +66,18 @@ export function TopicCloud({ topics, selected, onSelect, onRename }: TopicCloudP
         return (
           <div key={t.topic} class="group relative">
             <button
-              onClick={() => onSelect(isSelected ? "" : t.topic)}
+              onClick={() => onSelect(t.topic)}
               class={`px-2 py-1 rounded-lg transition-colors cursor-pointer ${
-                isSelected
-                  ? "bg-[var(--accent)] text-white"
-                  : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+                isSelected ? "text-white" : "hover:opacity-80"
               }`}
-              style={{ fontSize: `${scale}rem` }}
+              style={{
+                fontSize: `${scale}rem`,
+                ...(isSelected
+                  ? { background: catColor?.selected || "var(--accent)" }
+                  : catColor
+                    ? { background: catColor.bg, color: catColor.text }
+                    : { background: "var(--bg-tertiary)", color: "var(--text-secondary)" }),
+              }}
             >
               {t.topic}
               <span class="text-[0.6em] ml-1 opacity-60">{t.count}</span>
@@ -81,6 +96,25 @@ export function TopicCloud({ topics, selected, onSelect, onRename }: TopicCloudP
           </div>
         );
       })}
+      </div>
+      {canCollapse && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          class="flex items-center gap-1 mt-3 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          {expanded ? (
+            <>
+              <ChevronUp size={14} />
+              Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown size={14} />
+              Show {hiddenCount} more
+            </>
+          )}
+        </button>
+      )}
     </div>
   );
 }
