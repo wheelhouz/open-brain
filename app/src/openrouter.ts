@@ -232,6 +232,34 @@ export async function categorizeTopics(
     : [];
 }
 
+export async function categorizeMissing(
+  topics: string[],
+  existingCategories: string[],
+): Promise<{ name: string; topics: string[] }[]> {
+  const data = (await openrouterRequest("/chat/completions", {
+    model: config.extractionModel,
+    messages: [
+      {
+        role: "user",
+        content: `Assign each of these topics to one of the existing categories, or create a new category if none fit. Each topic must appear exactly once.\n\nTopics:\n${topics.map((t) => `- ${t}`).join("\n")}\n\nExisting categories:\n${existingCategories.map((c) => `- ${c}`).join("\n")}\n\nRespond with JSON: { "categories": [{ "name": "Category Name", "topics": ["topic1", "topic2"] }] }`,
+      },
+    ],
+    response_format: { type: "json_object" },
+    temperature: 0,
+  })) as { choices: Array<{ message: { content: string } }> };
+
+  const raw = JSON.parse(data.choices[0].message.content);
+  return Array.isArray(raw.categories)
+    ? raw.categories.filter(
+        (c: unknown): c is { name: string; topics: string[] } =>
+          typeof c === "object" &&
+          c !== null &&
+          typeof (c as Record<string, unknown>).name === "string" &&
+          Array.isArray((c as Record<string, unknown>).topics),
+      )
+    : [];
+}
+
 export async function assignCategory(
   topic: string,
   existingCategories: string[],
