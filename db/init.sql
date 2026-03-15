@@ -47,6 +47,74 @@ CREATE INDEX IF NOT EXISTS idx_thoughts_parent_id
 CREATE INDEX IF NOT EXISTS idx_thoughts_created_at
     ON thoughts (created_at DESC);
 
+-- Open Loops (derived from action_items)
+CREATE TABLE IF NOT EXISTS open_loops (
+    id                UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    content           TEXT        NOT NULL,
+    loop_type         TEXT        NOT NULL DEFAULT 'task'
+        CHECK (loop_type IN ('task', 'question', 'decision', 'waiting_on')),
+    source_thought_id UUID        REFERENCES thoughts(id),
+    status            TEXT        NOT NULL DEFAULT 'open'
+        CHECK (status IN ('open', 'closed', 'snoozed')),
+    resolution        TEXT,
+    snoozed_until     TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    closed_at         TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_open_loops_status_open
+    ON open_loops (created_at DESC) WHERE status = 'open';
+
+CREATE INDEX IF NOT EXISTS idx_open_loops_status_snoozed
+    ON open_loops (snoozed_until) WHERE status = 'snoozed';
+
+CREATE INDEX IF NOT EXISTS idx_open_loops_source_thought
+    ON open_loops (source_thought_id) WHERE source_thought_id IS NOT NULL;
+
+-- Open Loop Evidence (links loops to supporting thoughts)
+CREATE TABLE IF NOT EXISTS open_loop_evidence (
+    loop_id    UUID REFERENCES open_loops(id) ON DELETE CASCADE,
+    thought_id UUID REFERENCES thoughts(id),
+    noted_at   TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (loop_id, thought_id)
+);
+
+-- Entities (canonical person records, extensible to other types)
+CREATE TABLE IF NOT EXISTS entities (
+    id              UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    canonical_name  TEXT        NOT NULL,
+    entity_type     TEXT        NOT NULL DEFAULT 'person'
+        CHECK (entity_type IN ('person')),
+    attributes      JSONB       DEFAULT '{}'::jsonb,
+    aliases         TEXT[]      DEFAULT '{}',
+    embedding       vector(1536),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_name_type
+    ON entities (lower(canonical_name), entity_type);
+
+CREATE INDEX IF NOT EXISTS idx_entities_aliases
+    ON entities USING gin (aliases);
+
+CREATE INDEX IF NOT EXISTS idx_entities_embedding
+    ON entities USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+-- Entity Mentions (links entities to thoughts)
+CREATE TABLE IF NOT EXISTS entity_mentions (
+    entity_id  UUID REFERENCES entities(id) ON DELETE CASCADE,
+    thought_id UUID REFERENCES thoughts(id),
+    role       TEXT NOT NULL DEFAULT 'mentioned'
+        CHECK (role IN ('subject', 'mentioned', 'author')),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (entity_id, thought_id)
+);
+
+-- Phase 2 enrichment: link open loops to blocking entities
+ALTER TABLE open_loops ADD COLUMN IF NOT EXISTS blocked_by_entity_id UUID REFERENCES entities(id);
+
 -- Vector similarity search with metadata filtering
 DROP FUNCTION IF EXISTS match_thoughts;
 CREATE OR REPLACE FUNCTION match_thoughts(

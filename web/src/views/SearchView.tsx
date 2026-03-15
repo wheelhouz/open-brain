@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Thought } from "../api";
 import { selectedThoughtId, lastDeletedId, showToast, searchQuery } from "../state";
+import { useUrlSignal } from "../hooks/useUrlSignal";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { SwipeableCard } from "../components/SwipeableCard";
 import { DetailPanel } from "../components/DetailPanel";
@@ -36,6 +37,8 @@ function SkeletonCard() {
 }
 
 export function SearchView(_props: RoutableProps) {
+  useUrlSignal(selectedThoughtId, "thought");
+
   const [precision, setPrecision] = useState(1);
   const [results, setResults] = useState<(Thought & { similarity: number })[]>([]);
   const [loading, setLoading] = useState(false);

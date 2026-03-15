@@ -33,7 +33,7 @@ export interface Thought {
     type?: string;
     topics?: string[];
     people?: string[];
-    action_items?: string[];
+    action_items?: Array<string | { content: string; loop_type: string }>;
     dates_mentioned?: string[];
     source_context?: string;
     content_hash?: string;
@@ -43,6 +43,7 @@ export interface Thought {
   similarity?: number;
   parent_id?: string | null;
   thread_count?: number;
+  loop_count?: number;
 }
 
 export interface ThoughtsResponse {
@@ -76,10 +77,39 @@ export interface PersonEntry {
   last_seen: string;
 }
 
+export interface Entity {
+  id: string;
+  canonical_name: string;
+  entity_type: string;
+  aliases: string[];
+  attributes: Record<string, unknown>;
+  mention_count: number;
+  last_seen: string | null;
+  created_at: string;
+}
+
 export interface MergeCluster {
   canonical: string;
   merge: string[];
   reason: string;
+}
+
+export interface Loop {
+  id: string;
+  content: string;
+  loop_type: "task" | "question" | "decision" | "waiting_on";
+  status: "open" | "closed" | "snoozed";
+  resolution: string | null;
+  source_thought_id: string | null;
+  snoozed_until: string | null;
+  created_at: string;
+  closed_at: string | null;
+  evidence_count: number;
+}
+
+export interface LoopsResponse {
+  loops: Loop[];
+  next_cursor: string | null;
 }
 
 export interface CaptureResponse {
@@ -201,6 +231,84 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ merges }),
     }),
+
+  loops: (status?: string, loopType?: string) => {
+    const search = new URLSearchParams();
+    if (status) search.set("status", status);
+    if (loopType) search.set("loop_type", loopType);
+    const qs = search.toString();
+    return request<LoopsResponse>(`/api/loops${qs ? `?${qs}` : ""}`);
+  },
+
+  loop: (id: string) => request<Loop & { evidence: Thought[] }>(`/api/loops/${id}`),
+
+  loopsByThought: (thoughtId: string) =>
+    request<LoopsResponse>(`/api/loops?source_thought_id=${encodeURIComponent(thoughtId)}`),
+
+  closeLoop: (id: string, resolution?: string) =>
+    request<{ updated: boolean }>(`/api/loops/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "closed", resolution }),
+    }),
+
+  snoozeLoop: (id: string, until: string) =>
+    request<{ updated: boolean }>(`/api/loops/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "snoozed", snoozed_until: until }),
+    }),
+
+  reopenLoop: (id: string) =>
+    request<{ updated: boolean }>(`/api/loops/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "open" }),
+    }),
+
+  createLoop: (content: string, loopType?: string) =>
+    request<{ id: string; created_at: string }>("/api/loops", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, loop_type: loopType || "task" }),
+    }),
+
+  deleteLoop: (id: string) =>
+    request<{ deleted: boolean }>(`/api/loops/${id}`, {
+      method: "DELETE",
+    }),
+
+  entities: (type?: string) => {
+    const search = new URLSearchParams();
+    if (type) search.set("type", type);
+    const qs = search.toString();
+    return request<{ entities: Entity[] }>(`/api/entities${qs ? `?${qs}` : ""}`);
+  },
+
+  entity: (id: string) => request<Entity>(`/api/entities/${id}`),
+
+  updateEntity: (id: string, data: { canonical_name?: string; aliases?: string[]; attributes?: unknown }) =>
+    request<{ updated: boolean }>(`/api/entities/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+
+  mergeEntities: (sourceId: string, targetId: string) =>
+    request<{ merged: boolean; target_id: string; aliases: string[] }>("/api/entities/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: sourceId, target_id: targetId }),
+    }),
+
+  entityThoughts: (id: string, cursor?: string) => {
+    const search = new URLSearchParams();
+    if (cursor) search.set("cursor", cursor);
+    const qs = search.toString();
+    return request<{ thoughts: Thought[]; next_cursor: string | null }>(
+      `/api/entities/${id}/thoughts${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   renamePerson: (oldName: string, newName: string) =>
     request<{ renamed: boolean; from: string; to: string; affected: number }>(

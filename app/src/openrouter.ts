@@ -29,11 +29,16 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   return data.data[0].embedding;
 }
 
+export interface ActionItem {
+  content: string;
+  loop_type: "task" | "question" | "decision" | "waiting_on";
+}
+
 export interface ThoughtMetadata {
   type: string;
   topics: string[];
   people: string[];
-  action_items: string[];
+  action_items: ActionItem[];
   dates_mentioned: string[];
   source_context: string | null;
 }
@@ -44,10 +49,17 @@ const EXTRACTION_PROMPT = `You are a thought classifier. Given the following tho
     "type": one of "observation", "task", "idea", "reference", "person_note", "decision", "meeting_note",
     "topics": 1-3 subject tags as strings,
     "people": names of individuals mentioned (empty array if none),
-    "action_items": implied to-dos (empty array if none),
+    "action_items": array of objects with "content" and "loop_type" (empty array if none),
     "dates_mentioned": dates in YYYY-MM-DD format (empty array if none),
     "source_context": one of "ai_save", "meeting", "migration", "manual" or null
 }
+
+action_items loop_type values:
+- "task": Discrete work to do. Example: {"content": "Send the proposal to Sarah", "loop_type": "task"}
+- "question": Needs an answer found. Example: {"content": "What's our budget for Q2?", "loop_type": "question"}
+- "decision": Needs a choice made. Example: {"content": "Choose between Postgres and MySQL", "loop_type": "decision"}
+- "waiting_on": Blocked by something external. Example: {"content": "Waiting for client to sign contract", "loop_type": "waiting_on"}
+Default to "task" if unsure.
 
 Classification hints:
 - "Decision: ..." → type: decision
@@ -321,7 +333,13 @@ export async function extractMetadata(content: string): Promise<ThoughtMetadata>
     type: raw.type || "observation",
     topics: Array.isArray(raw.topics) ? raw.topics : [],
     people: Array.isArray(raw.people) ? raw.people : [],
-    action_items: Array.isArray(raw.action_items) ? raw.action_items : [],
+    action_items: Array.isArray(raw.action_items)
+      ? raw.action_items.map((item: unknown) =>
+          typeof item === "string"
+            ? { content: item, loop_type: "task" as const }
+            : { content: (item as ActionItem).content || "", loop_type: (item as ActionItem).loop_type || "task" },
+        )
+      : [],
     dates_mentioned: Array.isArray(raw.dates_mentioned) ? raw.dates_mentioned : [],
     source_context: raw.source_context || null,
   };
