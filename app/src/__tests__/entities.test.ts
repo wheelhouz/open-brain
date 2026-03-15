@@ -122,6 +122,8 @@ describe("PATCH /api/entities/:id", () => {
     mockQuery
       // SELECT existing entity
       .mockResolvedValueOnce({ rows: [{ id: "entity-1", canonical_name: "Old Name" }] })
+      // SELECT conflict check — no conflict
+      .mockResolvedValueOnce({ rows: [] })
       // UPDATE entities
       .mockResolvedValueOnce({ rows: [] })
       // UPDATE thoughts metadata.people
@@ -136,9 +138,49 @@ describe("PATCH /api/entities/:id", () => {
     const body = await res.json();
     expect(body.updated).toBe(true);
     // Verify the rename query updates thoughts metadata
-    expect(mockQuery).toHaveBeenCalledTimes(3);
-    expect(mockQuery.mock.calls[2][0]).toContain("UPDATE thoughts");
-    expect(mockQuery.mock.calls[2][1]).toEqual(["Old Name", "New Name"]);
+    expect(mockQuery).toHaveBeenCalledTimes(4);
+    expect(mockQuery.mock.calls[3][0]).toContain("UPDATE thoughts");
+    expect(mockQuery.mock.calls[3][1]).toEqual(["Old Name", "New Name"]);
+  });
+
+  it("returns 409 when renaming to an existing entity name", async () => {
+    mockQuery
+      // SELECT existing entity
+      .mockResolvedValueOnce({ rows: [{ id: "entity-1", canonical_name: "Old Name" }] })
+      // SELECT conflict check
+      .mockResolvedValueOnce({ rows: [{ id: "entity-2", canonical_name: "Alice" }] });
+
+    const res = await app.request("/api/entities/entity-1", {
+      method: "PATCH",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ canonical_name: "Alice" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.conflict).toBe("name_exists");
+    expect(body.existing_entity.id).toBe("entity-2");
+    expect(body.existing_entity.canonical_name).toBe("Alice");
+  });
+
+  it("proceeds with rename when no conflict exists", async () => {
+    mockQuery
+      // SELECT existing entity
+      .mockResolvedValueOnce({ rows: [{ id: "entity-1", canonical_name: "Old Name" }] })
+      // SELECT conflict check — no conflict
+      .mockResolvedValueOnce({ rows: [] })
+      // UPDATE entities
+      .mockResolvedValueOnce({ rows: [] })
+      // UPDATE thoughts metadata.people
+      .mockResolvedValueOnce({ rows: [] });
+
+    const res = await app.request("/api/entities/entity-1", {
+      method: "PATCH",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ canonical_name: "New Name" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.updated).toBe(true);
   });
 
   it("updates aliases without renaming thoughts", async () => {

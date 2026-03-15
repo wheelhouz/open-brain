@@ -287,12 +287,26 @@ export const api = {
 
   entity: (id: string) => request<Entity>(`/api/entities/${id}`),
 
-  updateEntity: (id: string, data: { canonical_name?: string; aliases?: string[]; attributes?: unknown }) =>
-    request<{ updated: boolean }>(`/api/entities/${id}`, {
+  updateEntity: async (id: string, data: { canonical_name?: string; aliases?: string[]; attributes?: unknown }) => {
+    const key = getKey();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+
+    const res = await fetch(`/api/entities/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(data),
-    }),
+    });
+    if (res.status === 401) throw new Error("Unauthorized");
+    if (res.status === 409) {
+      const body = await res.json();
+      const err = new Error("Name conflict") as Error & { conflict: typeof body };
+      err.conflict = body;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.json() as Promise<{ updated: boolean }>;
+  },
 
   mergeEntities: (sourceId: string, targetId: string) =>
     request<{ merged: boolean; target_id: string; aliases: string[] }>("/api/entities/merge", {

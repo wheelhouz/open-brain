@@ -106,6 +106,24 @@ entitiesRouter.patch("/:id", async (c) => {
     return c.json({ error: "Entity not found" }, 404);
   }
 
+  // Check for name conflict before updating
+  if (body.canonical_name !== undefined) {
+    const trimmed = body.canonical_name.trim();
+    if (trimmed !== existing.rows[0].canonical_name) {
+      const conflict = await query<{ id: string; canonical_name: string }>(
+        `SELECT id, canonical_name FROM entities
+         WHERE lower(canonical_name) = lower($1) AND entity_type = (SELECT entity_type FROM entities WHERE id = $2) AND id != $2`,
+        [trimmed, id],
+      );
+      if (conflict.rows.length > 0) {
+        return c.json({
+          conflict: "name_exists",
+          existing_entity: { id: conflict.rows[0].id, canonical_name: conflict.rows[0].canonical_name },
+        }, 409);
+      }
+    }
+  }
+
   const sets: string[] = ["updated_at = now()"];
   const params: unknown[] = [];
   let idx = 1;
