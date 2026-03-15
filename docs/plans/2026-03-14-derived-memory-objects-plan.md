@@ -4,7 +4,7 @@ Design: `docs/plans/2026-03-14-derived-memory-objects-design.md`
 
 ---
 
-## Step 1: Schema
+## Step 1: Schema ✅
 
 Add new tables and indexes to `db/init.sql` after the existing `topic_categories` block.
 
@@ -23,7 +23,7 @@ All DDL uses `IF NOT EXISTS` for safe re-runs on the existing deployment.
 
 ---
 
-## Step 2: Extraction prompt update
+## Step 2: Extraction prompt update ✅
 
 Extend the LLM extraction prompt in `app/src/openrouter.ts` to classify each action item by loop type.
 
@@ -36,7 +36,7 @@ Update `ThoughtMetadata` interface to reflect the new shape. The extraction prom
 
 ---
 
-## Step 3: Open Loops backend
+## Step 3: Open Loops backend ✅
 
 ### 3a: Route — `app/src/routes/loops.ts`
 
@@ -57,7 +57,7 @@ Import `loopsRouter` in `app/src/app.ts`, mount at `/api/loops`.
 
 ---
 
-## Step 4: Pipeline integration (loops)
+## Step 4: Pipeline integration (loops) ✅
 
 Modify `capturePipeline` in `app/src/pipeline.ts`:
 
@@ -71,7 +71,7 @@ Wrap in try/catch — best-effort, same pattern as topic auto-categorization. Ha
 
 ---
 
-## Step 5: Open Loops MCP tools
+## Step 5: Open Loops MCP tools ✅
 
 Add three tools to `app/src/mcp.ts`:
 
@@ -83,7 +83,7 @@ Add three tools to `app/src/mcp.ts`:
 
 ---
 
-## Step 6: Open Loops frontend
+## Step 6: Open Loops frontend ✅
 
 ### 6a: API client
 
@@ -119,7 +119,7 @@ Update `web/src/components/App.tsx`:
 
 ---
 
-## Step 7: Open Loops tests
+## Step 7: Open Loops tests ✅
 
 New file `app/src/__tests__/loops.test.ts`:
 - Mock db.js, follow existing pattern
@@ -134,7 +134,7 @@ New file `app/src/__tests__/loops.test.ts`:
 
 ---
 
-## Step 8: Entity resolution module
+## Step 8: Entity resolution module ✅
 
 New file `app/src/entities.ts`:
 
@@ -147,7 +147,7 @@ New file `app/src/entities.ts`:
 
 ---
 
-## Step 9: Entities backend
+## Step 9: Entities backend ✅
 
 ### 9a: Route — `app/src/routes/entities.ts`
 
@@ -165,7 +165,7 @@ Import `entitiesRouter` in `app/src/app.ts`, mount at `/api/entities`.
 
 ---
 
-## Step 10: Pipeline integration (entities)
+## Step 10: Pipeline integration (entities) ✅
 
 Modify `capturePipeline` in `app/src/pipeline.ts`:
 
@@ -177,7 +177,7 @@ Also update `updatePipeline` path: when reprocess=true and metadata is re-extrac
 
 ---
 
-## Step 11: Entities MCP tools
+## Step 11: Entities MCP tools ✅
 
 Add two tools to `app/src/mcp.ts`:
 
@@ -188,7 +188,7 @@ Add two tools to `app/src/mcp.ts`:
 
 ---
 
-## Step 12: People view evolution
+## Step 12: People view evolution ✅
 
 Update `web/src/views/PeopleView.tsx` to read from `/api/entities?type=person` instead of `/api/people`. Show aliases as sub-labels, mention count from entities table. Add merge button when two cards are selected.
 
@@ -198,7 +198,7 @@ Keep `/api/people` route working as fallback — no deletion.
 
 ---
 
-## Step 13: Entities tests
+## Step 13: Entities tests ✅
 
 New file `app/src/__tests__/entities.test.ts`:
 - Test GET /api/entities list
@@ -215,7 +215,7 @@ New file `app/src/__tests__/entity-resolution.test.ts`:
 
 ---
 
-## Step 14: Backfill script
+## Step 14: Backfill script ✅
 
 New file `scripts/backfill-derived.ts`:
 
