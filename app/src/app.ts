@@ -12,6 +12,8 @@ import { mcpRouter } from "./routes/mcp.js";
 import { topicsRouter } from "./routes/topics.js";
 import { peopleRouter } from "./routes/people.js";
 import { chatRouter } from "./routes/chat.js";
+import { loopsRouter } from "./routes/loops.js";
+import { entitiesRouter } from "./routes/entities.js";
 import { oauthRouter, wellKnownOAuth } from "./routes/oauth.js";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -46,6 +48,8 @@ api.route("/review", reviewRouter);
 api.route("/topics", topicsRouter);
 api.route("/people", peopleRouter);
 api.route("/chat", chatRouter);
+api.route("/loops", loopsRouter);
+api.route("/entities", entitiesRouter);
 
 app.route("/api", api);
 

@@ -1,7 +1,27 @@
 import crypto from "node:crypto";
 import { query } from "./db.js";
 import { generateEmbedding, extractMetadata, assignCategory, type ThoughtMetadata } from "./openrouter.js";
+import { resolveEntityMentions } from "./entities.js";
 import pgvector from "pgvector";
+
+export async function createLoopsFromActionItems(
+  actionItems: Array<{ content: string; loop_type: string } | string>,
+  thoughtId: string,
+): Promise<void> {
+  for (const item of actionItems) {
+    const loopContent = typeof item === "string" ? item : item.content;
+    const loopType = typeof item === "string" ? "task" : (item.loop_type || "task");
+    const loopResult = await query<{ id: string }>(
+      `INSERT INTO open_loops (content, loop_type, source_thought_id)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [loopContent, loopType, thoughtId],
+    );
+    await query(
+      `INSERT INTO open_loop_evidence (loop_id, thought_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [loopResult.rows[0].id, thoughtId],
+    );
+  }
+}
 
 export interface CaptureResult {
   id: string;
@@ -21,7 +41,7 @@ export async function capturePipeline(
       type: "observation" as const,
       topics: [] as string[],
       people: [] as string[],
-      action_items: [] as string[],
+      action_items: [] as { content: string; loop_type: "task" | "question" | "decision" | "waiting_on" }[],
       dates_mentioned: [] as string[],
       source_context: source || null,
     })),
@@ -32,9 +52,10 @@ export async function capturePipeline(
     metadata.source_context = source;
   }
 
-  // Add content hash for deduplication
+  // Add content hash for deduplication; strip action_items from stored metadata
   const contentHash = crypto.createHash("sha256").update(content).digest("hex");
-  const metadataWithHash = { ...metadata, content_hash: contentHash };
+  const { action_items, ...metadataForStorage } = metadata;
+  const metadataWithHash = { ...metadataForStorage, content_hash: contentHash };
 
   const result = await query<{ id: string; created_at: string }>(
     `INSERT INTO thoughts (content, embedding, metadata, parent_id)
@@ -75,8 +96,27 @@ export async function capturePipeline(
     }
   }
 
+  // Create open loops from action items (best-effort)
+  const thoughtId = result.rows[0].id;
+  if (action_items.length > 0) {
+    try {
+      await createLoopsFromActionItems(action_items, thoughtId);
+    } catch {
+      // Don't fail capture if loop creation fails
+    }
+  }
+
+  // Resolve entity mentions from people (best-effort)
+  if (metadata.people.length > 0) {
+    try {
+      await resolveEntityMentions(metadata.people, thoughtId);
+    } catch {
+      // Don't fail capture if entity resolution fails
+    }
+  }
+
   return {
-    id: result.rows[0].id,
+    id: thoughtId,
     metadata,
     created_at: result.rows[0].created_at,
   };

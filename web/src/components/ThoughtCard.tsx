@@ -23,6 +23,7 @@ interface ThoughtCardProps {
   onClick?: () => void;
   selected?: boolean;
   similarity?: number;
+  badge?: string;
 }
 
 export function ThoughtCard({
@@ -30,12 +31,13 @@ export function ThoughtCard({
   onClick,
   selected,
   similarity,
+  badge,
 }: ThoughtCardProps) {
   const type = thought.metadata?.type;
   const Icon = TYPE_ICONS[type || ""] || Eye;
   const topics = thought.metadata?.topics || [];
   const people = thought.metadata?.people || [];
-  const actionItems = thought.metadata?.action_items || [];
+  const loopCount = thought.loop_count || 0;
 
   const extracted = extractHeadline(thought.content);
   const hasHeadline = !!extracted;
@@ -72,9 +74,14 @@ export function ThoughtCard({
               >
                 {typeLabel(type)}
               </span>
-              {actionItems.length > 0 && (
+              {badge && (
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)] font-medium">
+                  {badge}
+                </span>
+              )}
+              {loopCount > 0 && (
                 <span class="text-[10px] text-[var(--text-muted)]">
-                  {actionItems.length} action{actionItems.length > 1 ? "s" : ""}
+                  {loopCount} loop{loopCount > 1 ? "s" : ""}
                 </span>
               )}
               {!!thought.thread_count && thought.thread_count > 0 && (

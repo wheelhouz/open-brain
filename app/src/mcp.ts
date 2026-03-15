@@ -276,5 +276,161 @@ export function createMcpServer(): McpServer {
     },
   );
 
+  // list_open_loops
+  server.tool(
+    "list_open_loops",
+    "List open loops (action items, questions, decisions, waiting-on items). Filterable by status and type.",
+    {
+      status: z.enum(["open", "closed", "snoozed"]).default("open").describe("Filter by status"),
+      loop_type: z.enum(["task", "question", "decision", "waiting_on"]).optional().describe("Filter by loop type"),
+      limit: z.number().default(20).describe("Max results"),
+    },
+    async ({ status, loop_type, limit }) => {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      let idx = 1;
+
+      if (status === "open") {
+        conditions.push(`(status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`);
+      } else {
+        conditions.push(`status = $${idx++}`);
+        params.push(status);
+      }
+
+      if (loop_type) {
+        conditions.push(`loop_type = $${idx++}`);
+        params.push(loop_type);
+      }
+
+      params.push(Math.min(limit, 100));
+
+      const result = await query(
+        `SELECT id, content, loop_type, status, resolution, source_thought_id, created_at, closed_at
+         FROM open_loops
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY created_at DESC
+         LIMIT $${idx}`,
+        params,
+      );
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
+      };
+    },
+  );
+
+  // close_loop
+  server.tool(
+    "close_loop",
+    "Close an open loop, optionally with a resolution note (answer for questions, rationale for decisions).",
+    {
+      id: z.string().describe("The loop UUID"),
+      resolution: z.string().optional().describe("Resolution text — answer, rationale, or closing note"),
+    },
+    async ({ id, resolution }) => {
+      const result = await query(
+        `UPDATE open_loops SET status = 'closed', closed_at = now(), resolution = $2
+         WHERE id = $1 AND status != 'closed'
+         RETURNING id, content, status`,
+        [id, resolution || null],
+      );
+
+      if (result.rows.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: `Loop "${id}" not found or already closed.` }],
+        };
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
+      };
+    },
+  );
+
+  // snooze_loop
+  server.tool(
+    "snooze_loop",
+    "Snooze a loop until a future date. It will auto-surface in the open list after that date.",
+    {
+      id: z.string().describe("The loop UUID"),
+      until: z.string().describe("ISO 8601 date to snooze until (e.g. 2026-03-21)"),
+    },
+    async ({ id, until }) => {
+      const result = await query(
+        `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
+         WHERE id = $1 AND status != 'closed'
+         RETURNING id, content, status, snoozed_until`,
+        [id, until],
+      );
+
+      if (result.rows.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: `Loop "${id}" not found or already closed.` }],
+        };
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
+      };
+    },
+  );
+
+  // get_entity
+  server.tool(
+    "get_entity",
+    "Look up a person (entity) by name or alias. Returns the canonical entity record with mention count.",
+    {
+      name: z.string().describe("Person name to search for (checks canonical name and aliases)"),
+    },
+    async ({ name }) => {
+      const result = await query(
+        `SELECT e.id, e.canonical_name, e.entity_type, e.aliases, e.attributes,
+                count(em.thought_id) as mention_count
+         FROM entities e
+         LEFT JOIN entity_mentions em ON em.entity_id = e.id
+         WHERE (lower(e.canonical_name) = lower($1) OR $1 ILIKE ANY(e.aliases))
+           AND e.entity_type = 'person'
+         GROUP BY e.id
+         LIMIT 1`,
+        [name],
+      );
+
+      if (result.rows.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: `No entity found matching "${name}".` }],
+        };
+      }
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
+      };
+    },
+  );
+
+  // list_entity_mentions
+  server.tool(
+    "list_entity_mentions",
+    "List thoughts that mention a specific entity. Returns the evidence timeline.",
+    {
+      entity_id: z.string().describe("The entity UUID"),
+      limit: z.number().default(10).describe("Max results"),
+    },
+    async ({ entity_id, limit }) => {
+      const result = await query(
+        `SELECT t.id, t.content, t.metadata, t.created_at
+         FROM entity_mentions em
+         JOIN thoughts t ON t.id = em.thought_id
+         WHERE em.entity_id = $1 AND t.deleted_at IS NULL
+         ORDER BY t.created_at DESC
+         LIMIT $2`,
+        [entity_id, Math.min(limit, 100)],
+      );
+
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
+      };
+    },
+  );
+
   return server;
 }

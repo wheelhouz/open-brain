@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
 import pgvector from "pgvector";
-import { updatePipeline } from "../pipeline.js";
+import { updatePipeline, createLoopsFromActionItems } from "../pipeline.js";
+import { resolveEntityMentions } from "../entities.js";
 
 export const thoughtsRouter = new Hono();
 
@@ -59,9 +60,11 @@ thoughtsRouter.get("/", async (c) => {
     created_at: string;
     updated_at: string;
     thread_count: number;
+    loop_count: number;
   }>(
     `SELECT id, content, metadata, created_at, updated_at,
-       (SELECT count(*)::int FROM thoughts c WHERE c.parent_id = thoughts.id AND c.deleted_at IS NULL) as thread_count
+       (SELECT count(*)::int FROM thoughts c WHERE c.parent_id = thoughts.id AND c.deleted_at IS NULL) as thread_count,
+       (SELECT count(*)::int FROM open_loops WHERE source_thought_id = thoughts.id) as loop_count
      FROM thoughts
      ${where}
      ORDER BY created_at DESC
@@ -86,8 +89,10 @@ thoughtsRouter.get("/:id", async (c) => {
     created_at: string;
     updated_at: string;
     parent_id: string | null;
+    loop_count: number;
   }>(
-    `SELECT id, content, metadata, created_at, updated_at, parent_id
+    `SELECT id, content, metadata, created_at, updated_at, parent_id,
+       (SELECT count(*)::int FROM open_loops WHERE source_thought_id = thoughts.id) as loop_count
      FROM thoughts
      WHERE id = $1 AND deleted_at IS NULL`,
     [id],
@@ -216,7 +221,8 @@ thoughtsRouter.patch("/:id", async (c) => {
   let params: unknown[];
 
   if (metadata) {
-    // Full re-process: overwrite metadata fields
+    // Full re-process: strip action_items from stored metadata
+    const { action_items, ...metadataForStorage } = metadata;
     sql = `UPDATE thoughts
       SET content = $1,
           embedding = $2,
@@ -227,7 +233,7 @@ thoughtsRouter.patch("/:id", async (c) => {
     params = [
       content,
       pgvector.toSql(embedding),
-      JSON.stringify({ ...metadata, content_hash }),
+      JSON.stringify({ ...metadataForStorage, content_hash }),
       id,
     ];
   } else {
@@ -254,6 +260,32 @@ thoughtsRouter.patch("/:id", async (c) => {
 
   if (result.rows.length === 0) {
     return c.json({ error: "Thought not found" }, 404);
+  }
+
+  // Re-resolve entity mentions and recreate loops when metadata was re-extracted
+  if (metadata) {
+    const people = Array.isArray(metadata.people) ? metadata.people : [];
+    if (people.length > 0) {
+      try {
+        await resolveEntityMentions(people, id);
+      } catch {
+        // Don't fail update if entity resolution fails
+      }
+    }
+
+    // Recreate loops: delete existing open loops, preserve closed/snoozed
+    const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items : [];
+    if (actionItems.length > 0) {
+      try {
+        await query(
+          `DELETE FROM open_loops WHERE source_thought_id = $1 AND status = 'open'`,
+          [id],
+        );
+        await createLoopsFromActionItems(actionItems, id);
+      } catch {
+        // Don't fail update if loop recreation fails
+      }
+    }
   }
 
   return c.json(result.rows[0]);

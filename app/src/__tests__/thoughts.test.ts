@@ -67,6 +67,22 @@ describe("GET /thoughts", () => {
     expect(body.next_cursor).toBe("2026-03-02");
   });
 
+  it("includes loop_count in response", async () => {
+    mockQuery.mockResolvedValue({
+      rows: [
+        { id: "1", content: "thought 1", metadata: {}, created_at: "2026-03-04", updated_at: "2026-03-04", thread_count: 0, loop_count: 3 },
+      ],
+    });
+
+    const res = await app.request("/api/thoughts?limit=1", { headers: AUTH });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.thoughts[0].loop_count).toBe(3);
+    // Verify SQL includes loop_count subquery
+    const sql = mockQuery.mock.calls[0][0] as string;
+    expect(sql).toContain("loop_count");
+  });
+
   it("filters by type", async () => {
     mockQuery.mockResolvedValue({ rows: [] });
 

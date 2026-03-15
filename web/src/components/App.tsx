@@ -12,14 +12,16 @@ import { StatsView } from "../views/StatsView";
 import { ChatView } from "../views/ChatView";
 import { CaptureBar } from "./CaptureBar";
 import { SearchBar } from "./SearchBar";
-import { Brain, List, Hash, Users, BarChart3, MessageCircle } from "lucide-preact";
+import { LoopsView } from "../views/LoopsView";
+import { Brain, List, Hash, Users, BarChart3, MessageCircle, CircleDot } from "lucide-preact";
 
 const tabs = [
   { path: "/", label: "Stream", icon: List, key: "1" },
   { path: "/topics", label: "Topics", icon: Hash, key: "2" },
   { path: "/people", label: "People", icon: Users, key: "3" },
-  { path: "/stats", label: "Stats", icon: BarChart3, key: "4" },
-  { path: "/chat", label: "Chat", icon: MessageCircle, key: "5" },
+  { path: "/loops", label: "Loops", icon: CircleDot, key: "4" },
+  { path: "/stats", label: "Stats", icon: BarChart3, key: "5" },
+  { path: "/chat", label: "Chat", icon: MessageCircle, key: "6" },
 ];
 
 export function App() {
@@ -92,6 +94,7 @@ export function App() {
             <SearchView path="/search" />
             <TopicsView path="/topics" />
             <PeopleView path="/people" />
+            <LoopsView path="/loops" />
             <StatsView path="/stats" />
             <ChatView path="/chat" />
           </Router>

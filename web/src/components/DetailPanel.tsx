@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { selectedThoughtId, lastDeletedId, showToast } from "../state";
-import { api, type Thought } from "../api";
+import { selectedThoughtId, selectedLoopId, lastDeletedId, showToast } from "../state";
+import { api, type Thought, type Loop } from "../api";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThoughtCard } from "./ThoughtCard";
 import { BottomSheet } from "./BottomSheet";
@@ -39,6 +39,7 @@ export function DetailPanel() {
   const [discussOpen, setDiscussOpen] = useState(false);
   const discussRef = useRef<HTMLDivElement>(null);
   const [thread, setThread] = useState<Thought[]>([]);
+  const [loops, setLoops] = useState<Loop[]>([]);
   const [addingNote, setAddingNote] = useState(false);
   const [noteContent, setNoteContent] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -48,6 +49,7 @@ export function DetailPanel() {
       setThought(null);
       setRelated([]);
       setThread([]);
+      setLoops([]);
       return;
     }
 
@@ -63,10 +65,12 @@ export function DetailPanel() {
       api.thought(id),
       api.related(id).catch(() => ({ related: [] })),
       api.thread(id).catch(() => ({ thread: [] })),
-    ]).then(([t, r, th]) => {
+      api.loopsByThought(id).catch(() => ({ loops: [] })),
+    ]).then(([t, r, th, l]) => {
       setThought(t);
       setRelated(r.related);
       setThread(th.thread);
+      setLoops(l.loops);
       setLoading(false);
       contentRef.current?.scrollTo(0, 0);
     }).catch(() => {
@@ -440,26 +444,54 @@ export function DetailPanel() {
                 </div>
               )}
 
-              {/* Action items */}
-              {thought.metadata?.action_items &&
-                thought.metadata.action_items.length > 0 && (
-                  <div class="mt-4">
-                    <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                      Action Items
-                    </h4>
-                    <ul class="space-y-1.5">
-                      {thought.metadata.action_items.map((item, i) => (
-                        <li
-                          key={i}
-                          class="text-sm text-[var(--text-secondary)] flex items-start gap-2 leading-relaxed"
-                        >
-                          <span class="text-[var(--type-task)] mt-0.5">&#x2022;</span>
-                          {item}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+              {/* Loops (action items) */}
+              {loops.length > 0 ? (
+                <div class="mt-4">
+                  <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                    Loops ({loops.length})
+                  </h4>
+                  <ul class="space-y-1.5">
+                    {loops.map((loop) => (
+                      <li
+                        key={loop.id}
+                        class="text-sm flex items-start gap-2 leading-relaxed cursor-pointer hover:bg-[var(--surface-hover)] rounded-md px-1.5 py-1 -mx-1.5 transition-colors"
+                        onClick={() => {
+                          selectedThoughtId.value = null;
+                          selectedLoopId.value = loop.id;
+                          route("/loops?status=" + loop.status);
+                        }}
+                      >
+                        <span class={`mt-0.5 flex-shrink-0 text-xs ${loop.status === "closed" ? "text-green-500" : loop.status === "snoozed" ? "text-yellow-500" : "text-[var(--type-task)]"}`}>
+                          {loop.status === "closed" ? "\u2713" : loop.status === "snoozed" ? "\u23F8" : "\u2022"}
+                        </span>
+                        <span class={loop.status === "closed" ? "text-[var(--text-muted)] line-through" : "text-[var(--text-secondary)]"}>
+                          {loop.content}
+                        </span>
+                        <span class="text-[10px] text-[var(--text-muted)] mt-0.5 flex-shrink-0 capitalize">
+                          {loop.loop_type.replace("_", " ")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : thought.metadata?.action_items && thought.metadata.action_items.length > 0 ? (
+                <div class="mt-4">
+                  <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                    Action Items
+                  </h4>
+                  <ul class="space-y-1.5">
+                    {thought.metadata.action_items.map((item, i) => (
+                      <li
+                        key={i}
+                        class="text-sm text-[var(--text-secondary)] flex items-start gap-2 leading-relaxed"
+                      >
+                        <span class="text-[var(--type-task)] mt-0.5">&#x2022;</span>
+                        {typeof item === "string" ? item : item.content}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               {/* Source */}
               {thought.metadata?.source_context && (
