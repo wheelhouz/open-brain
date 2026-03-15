@@ -33,7 +33,9 @@ backfillRouter.post("/", async (c) => {
       const result = await query<{ id: string }>(
         `INSERT INTO open_loops (content, loop_type, source_thought_id)
          VALUES ($1, $2, $3)
-         ON CONFLICT DO NOTHING
+         ON CONFLICT (md5(content), source_thought_id)
+           WHERE source_thought_id IS NOT NULL
+           DO NOTHING
          RETURNING id`,
         [content.trim(), loopType, thought.id],
       );

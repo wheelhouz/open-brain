@@ -71,6 +71,9 @@ CREATE INDEX IF NOT EXISTS idx_open_loops_status_snoozed
 CREATE INDEX IF NOT EXISTS idx_open_loops_source_thought
     ON open_loops (source_thought_id) WHERE source_thought_id IS NOT NULL;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_open_loops_content_source
+    ON open_loops (md5(content), source_thought_id) WHERE source_thought_id IS NOT NULL;
+
 -- Open Loop Evidence (links loops to supporting thoughts)
 CREATE TABLE IF NOT EXISTS open_loop_evidence (
     loop_id    UUID REFERENCES open_loops(id) ON DELETE CASCADE,
