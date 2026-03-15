@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Entity, type Thought } from "../api";
 import { selectedThoughtId, lastDeletedId, showToast } from "../state";
+import { useUrlSignal } from "../hooks/useUrlSignal";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { SwipeableCard } from "../components/SwipeableCard";
 import { DetailPanel } from "../components/DetailPanel";
@@ -94,6 +95,8 @@ function EntityCard({
 }
 
 export function PeopleView(_props: RoutableProps) {
+  useUrlSignal(selectedThoughtId, "thought");
+
   const [entities, setEntities] = useState<Entity[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [thoughts, setThoughts] = useState<Thought[]>([]);
@@ -127,6 +130,35 @@ export function PeopleView(_props: RoutableProps) {
   }, []);
 
   useEffect(loadEntities, [loadEntities]);
+
+  // Auto-select entity from ?selected= query param (matches by name/alias)
+  const applySelectedParam = useCallback(() => {
+    if (entities.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const selected = params.get("selected");
+    if (!selected) return;
+    const match = entities.find(
+      (e) =>
+        e.canonical_name.toLowerCase() === selected.toLowerCase() ||
+        e.aliases.some((a) => a.toLowerCase() === selected.toLowerCase()),
+    );
+    if (match) setSelectedId(match.id);
+  }, [entities]);
+
+  useEffect(applySelectedParam, [applySelectedParam]);
+
+  // Re-apply when navigating to /people?selected=... while already on People tab
+  useEffect(() => {
+    const onRouteChange = () => applySelectedParam();
+    addEventListener("popstate", onRouteChange);
+    // preact-router uses pushState which doesn't fire popstate, so patch it
+    const origPushState = history.pushState.bind(history);
+    history.pushState = (...args) => { origPushState(...args); onRouteChange(); };
+    return () => {
+      removeEventListener("popstate", onRouteChange);
+      history.pushState = origPushState;
+    };
+  }, [applySelectedParam]);
 
   useEffect(() => {
     if (!selectedId) {

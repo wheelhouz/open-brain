@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Thought } from "../api";
 import { selectedThoughtId, lastDeletedId, lastCapturedThought, showToast } from "../state";
+import { useUrlSignal } from "../hooks/useUrlSignal";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { SwipeableCard } from "../components/SwipeableCard";
 import { FilterBar } from "../components/FilterBar";
@@ -9,6 +10,8 @@ import { DetailPanel } from "../components/DetailPanel";
 import { formatDate, groupByDate } from "../lib/format";
 
 export function StreamView(_props: RoutableProps) {
+  useUrlSignal(selectedThoughtId, "thought");
+
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);

@@ -4,6 +4,7 @@ import { api, type Loop } from "../api";
 import { showToast, selectedLoopId } from "../state";
 import { LoopCard } from "../components/LoopCard";
 import { LoopDetailPanel } from "../components/LoopDetailPanel";
+import { useUrlSignal } from "../hooks/useUrlSignal";
 
 const statusTabs = [
   { value: "open", label: "Open" },
@@ -20,6 +21,8 @@ const typeFilters = [
 ] as const;
 
 export function LoopsView(_props: RoutableProps) {
+  useUrlSignal(selectedLoopId, "id");
+
   const [loops, setLoops] = useState<Loop[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>(() => {

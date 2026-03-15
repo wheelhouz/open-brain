@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { selectedLoopId, selectedThoughtId, showToast } from "../state";
+import { selectedLoopId, showToast } from "../state";
 import { api, type Loop, type Thought } from "../api";
 import { BottomSheet } from "./BottomSheet";
 import { ThoughtCard } from "./ThoughtCard";
@@ -332,8 +332,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
                       badge={loop.evidence!.length > 1 && loop.source_thought_id === t.id ? "Source" : undefined}
                       onClick={() => {
                         selectedLoopId.value = null;
-                        route("/");
-                        selectedThoughtId.value = t.id;
+                        route("/?thought=" + t.id);
                       }}
                     />
                   ))}
