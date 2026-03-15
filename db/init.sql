@@ -71,6 +71,20 @@ CREATE INDEX IF NOT EXISTS idx_open_loops_status_snoozed
 CREATE INDEX IF NOT EXISTS idx_open_loops_source_thought
     ON open_loops (source_thought_id) WHERE source_thought_id IS NOT NULL;
 
+-- Deduplicate open_loops before creating unique index (keeps earliest row per content+source)
+DELETE FROM open_loop_evidence WHERE loop_id IN (
+    SELECT id FROM open_loops WHERE source_thought_id IS NOT NULL AND id NOT IN (
+        SELECT DISTINCT ON (md5(content), source_thought_id) id
+        FROM open_loops WHERE source_thought_id IS NOT NULL
+        ORDER BY md5(content), source_thought_id, created_at
+    )
+);
+DELETE FROM open_loops WHERE source_thought_id IS NOT NULL AND id NOT IN (
+    SELECT DISTINCT ON (md5(content), source_thought_id) id
+    FROM open_loops WHERE source_thought_id IS NOT NULL
+    ORDER BY md5(content), source_thought_id, created_at
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_open_loops_content_source
     ON open_loops (md5(content), source_thought_id) WHERE source_thought_id IS NOT NULL;
 
