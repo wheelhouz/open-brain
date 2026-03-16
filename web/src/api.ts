@@ -105,6 +105,8 @@ export interface Loop {
   created_at: string;
   closed_at: string | null;
   evidence_count: number;
+  last_evidence_at: string | null;
+  source_preview: string | null;
 }
 
 export interface LoopsResponse {

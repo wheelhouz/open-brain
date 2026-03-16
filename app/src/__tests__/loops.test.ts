@@ -47,6 +47,8 @@ describe("GET /api/loops", () => {
           created_at: "2026-03-14T00:00:00Z",
           closed_at: null,
           evidence_count: "1",
+          last_evidence_at: "2026-03-14T00:00:00Z",
+          source_preview: null,
         },
       ],
     });
@@ -73,6 +75,8 @@ describe("GET /api/loops", () => {
           created_at: "2026-03-14T00:00:00Z",
           closed_at: null,
           evidence_count: "1",
+          last_evidence_at: "2026-03-14T00:00:00Z",
+          source_preview: "Source thought content",
         },
         {
           id: "loop-2",
@@ -85,6 +89,8 @@ describe("GET /api/loops", () => {
           created_at: "2026-03-13T00:00:00Z",
           closed_at: "2026-03-14T00:00:00Z",
           evidence_count: "1",
+          last_evidence_at: "2026-03-13T00:00:00Z",
+          source_preview: "Source thought content",
         },
       ],
     });
@@ -98,6 +104,34 @@ describe("GET /api/loops", () => {
       expect.stringContaining("source_thought_id = $1"),
       expect.arrayContaining(["thought-1"]),
     );
+  });
+
+  it("returns last_evidence_at and source_preview fields", async () => {
+    mockQuery.mockResolvedValue({
+      rows: [
+        {
+          id: "loop-1",
+          content: "Check the docs",
+          loop_type: "task",
+          status: "open",
+          resolution: null,
+          source_thought_id: "thought-1",
+          snoozed_until: null,
+          created_at: "2026-03-14T00:00:00Z",
+          closed_at: null,
+          evidence_count: "3",
+          last_evidence_at: "2026-03-15T12:00:00Z",
+          source_preview: "Meeting notes from Monday standup about deployment",
+        },
+      ],
+    });
+
+    const res = await app.request("/api/loops", { headers: AUTH });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.loops[0].last_evidence_at).toBe("2026-03-15T12:00:00Z");
+    expect(body.loops[0].source_preview).toBe("Meeting notes from Monday standup about deployment");
+    expect(body.loops[0].evidence_count).toBe(3);
   });
 
   it("filters by status and loop_type", async () => {

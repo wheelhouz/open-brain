@@ -50,9 +50,18 @@ loopsRouter.get("/", async (c) => {
     created_at: string;
     closed_at: string | null;
     evidence_count: string;
+    last_evidence_at: string | null;
+    source_preview: string | null;
   }>(
-    `SELECT l.*, (SELECT count(*) FROM open_loop_evidence WHERE loop_id = l.id) as evidence_count
+    `SELECT l.*,
+       (SELECT count(*) FROM open_loop_evidence WHERE loop_id = l.id) as evidence_count,
+       (SELECT max(noted_at) FROM open_loop_evidence WHERE loop_id = l.id) as last_evidence_at,
+       sp.source_preview
      FROM open_loops l
+     LEFT JOIN LATERAL (
+       SELECT left(t.content, 80) as source_preview
+       FROM thoughts t WHERE t.id = l.source_thought_id
+     ) sp ON true
      WHERE ${conditions.join(" AND ")}
      ORDER BY l.created_at DESC
      LIMIT $${idx}`,
