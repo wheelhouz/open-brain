@@ -81,7 +81,7 @@ function QuickActions({ loop, onChanged }: { loop: Loop; onChanged?: () => void 
     d.setDate(d.getDate() + days);
     try {
       await api.snoozeLoop(loop.id, d.toISOString().slice(0, 10));
-      showToast(`Snoozed ${days === 1 ? "until tomorrow" : `for ${days} days`}`, "success");
+      showToast(`Reminder set for ${days === 1 ? "tomorrow" : `${days} days from now`}`, "success");
       setOpen(false);
       onChanged?.();
     } catch {
@@ -135,19 +135,19 @@ function QuickActions({ loop, onChanged }: { loop: Loop; onChanged?: () => void 
       {open && (
         <div class="absolute right-0 top-full mt-1 z-20 bg-[var(--surface)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[140px]">
           {isClosed ? (
-            <button onClick={handleReopen} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
+            <button onClick={handleReopen} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
               <RotateCcw class="w-3.5 h-3.5" /> Reopen
             </button>
           ) : (
             <>
-              <button onClick={handleClose} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-green-400 hover:bg-[var(--bg-secondary)]">
+              <button onClick={handleClose} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-green-400 hover:bg-[var(--bg-secondary)]">
                 <Check class="w-3.5 h-3.5" /> Close
               </button>
-              <button onClick={(e) => handleSnooze(e, 1)} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-amber-400 hover:bg-[var(--bg-secondary)]">
-                <AlarmClock class="w-3.5 h-3.5" /> Tomorrow
+              <button onClick={(e) => handleSnooze(e, 1)} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-amber-400 hover:bg-[var(--bg-secondary)]">
+                <AlarmClock class="w-3.5 h-3.5" /> Remind me tomorrow
               </button>
-              <button onClick={(e) => handleSnooze(e, 7)} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-amber-400 hover:bg-[var(--bg-secondary)]">
-                <AlarmClock class="w-3.5 h-3.5" /> Next week
+              <button onClick={(e) => handleSnooze(e, 7)} class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-amber-400 hover:bg-[var(--bg-secondary)]">
+                <AlarmClock class="w-3.5 h-3.5" /> Remind me next week
               </button>
             </>
           )}
@@ -166,7 +166,9 @@ export function LoopCard({ loop, onClick, onChanged, selected }: LoopCardProps) 
 
   // Build meta parts
   const metaParts: string[] = [typeLabels[loop.loop_type]];
-  metaParts.push(loop.evidence_count === 1 ? "1 thought" : `${loop.evidence_count} thoughts`);
+  if (loop.evidence_count > 0) {
+    metaParts.push(loop.evidence_count === 1 ? "1 thought" : `${loop.evidence_count} thoughts`);
+  }
   if (loop.source_preview) {
     const preview = loop.source_preview.length >= 78 ? loop.source_preview + "..." : loop.source_preview;
     metaParts.push(`Source: "${preview}"`);
@@ -219,7 +221,7 @@ export function LoopCard({ loop, onClick, onChanged, selected }: LoopCardProps) 
             </span>
             {dueNow && (
               <span class="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400">
-                Due now
+                Resurfaced
               </span>
             )}
             {needsAction && (
@@ -229,7 +231,12 @@ export function LoopCard({ loop, onClick, onChanged, selected }: LoopCardProps) 
             )}
             {loop.status === "snoozed" && loop.snoozed_until && !dueNow && (
               <span class="text-[10px] text-amber-400">
-                snoozed until {new Date(loop.snoozed_until).toLocaleDateString()}
+                remind me {new Date(loop.snoozed_until).toLocaleDateString()}
+              </span>
+            )}
+            {loop.last_evidence_at && (
+              <span class="text-[10px] text-[var(--text-muted)]">
+                active {relativeTime(loop.last_evidence_at)}
               </span>
             )}
           </div>

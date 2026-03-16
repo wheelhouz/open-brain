@@ -57,29 +57,30 @@ function groupLoops(loops: Loop[], status: string): LoopGroup[] {
   if (status === "open") {
     const now = new Date();
     const twoDaysAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    const dueNow: Loop[] = [];
-    const newLoops: Loop[] = [];
-    const hasContext: Loop[] = [];
-    const older: Loop[] = [];
+    const resurfaced: Loop[] = [];
+    const active: Loop[] = [];
+    const recent: Loop[] = [];
+    const dormant: Loop[] = [];
 
     for (const loop of loops) {
       if (loop.status === "snoozed" && loop.snoozed_until && new Date(loop.snoozed_until) <= now) {
-        dueNow.push(loop);
-      } else if (new Date(loop.created_at) >= twoDaysAgo) {
-        newLoops.push(loop);
-      } else if (loop.evidence_count > 1) {
-        hasContext.push(loop);
+        resurfaced.push(loop);
+      } else if (loop.last_evidence_at && new Date(loop.last_evidence_at) >= sevenDaysAgo) {
+        active.push(loop);
+      } else if (!loop.last_evidence_at && new Date(loop.created_at) >= twoDaysAgo) {
+        recent.push(loop);
       } else {
-        older.push(loop);
+        dormant.push(loop);
       }
     }
 
     return [
-      { label: "Due now", loops: dueNow },
-      { label: "New", loops: newLoops },
-      { label: "Has context", loops: hasContext },
-      { label: "Older", loops: older },
+      { label: "Resurfaced", loops: resurfaced },
+      { label: "Active", loops: active },
+      { label: "Recent", loops: recent },
+      { label: "Dormant", loops: dormant },
     ].filter((g) => g.loops.length > 0);
   }
 

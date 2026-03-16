@@ -4,7 +4,7 @@ import type { Loop } from "../api";
 import { api } from "../api";
 import { showToast } from "../state";
 import { SwipeableCard, type SwipeAction } from "./SwipeableCard";
-import { Trash2, Check, AlarmClock, CalendarClock, RotateCcw } from "lucide-preact";
+import { Trash2, Check, AlarmClock, RotateCcw } from "lucide-preact";
 
 interface SwipeableLoopCardProps {
   loop: Loop;
@@ -57,33 +57,33 @@ export function SwipeableLoopCard({ loop, onChanged, onDelete, children }: Swipe
       },
       {
         icon: <AlarmClock class="w-4 h-4" />,
-        label: <span>Snooze<br />1 day</span>,
+        label: "Tomorrow",
         color: "#f59e0b",
         onAction: async () => {
           const d = new Date();
           d.setDate(d.getDate() + 1);
           try {
             await api.snoozeLoop(loop.id, d.toISOString().slice(0, 10));
-            showToast("Snoozed until tomorrow", "success");
+            showToast("Reminder set for tomorrow", "success");
             onChanged?.();
           } catch {
-            showToast("Failed to snooze loop", "error");
+            showToast("Failed to set reminder", "error");
           }
         },
       },
       {
-        icon: <CalendarClock class="w-4 h-4" />,
-        label: <span>Snooze<br />1 week</span>,
+        icon: <AlarmClock class="w-4 h-4" />,
+        label: "Next week",
         color: "#f59e0b",
         onAction: async () => {
           const d = new Date();
           d.setDate(d.getDate() + 7);
           try {
             await api.snoozeLoop(loop.id, d.toISOString().slice(0, 10));
-            showToast("Snoozed for 1 week", "success");
+            showToast("Reminder set for next week", "success");
             onChanged?.();
           } catch {
-            showToast("Failed to snooze loop", "error");
+            showToast("Failed to set reminder", "error");
           }
         },
       },

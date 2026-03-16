@@ -121,7 +121,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     if (!snoozeDate) return;
     try {
       await api.snoozeLoop(loop.id, snoozeDate);
-      showToast("Loop snoozed", "success");
+      showToast("Reminder set", "success");
       setLoop({ ...loop, status: "snoozed", snoozed_until: snoozeDate });
       setShowSnooze(false);
       onLoopChanged?.();
@@ -220,11 +220,11 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
               </div>
             )}
 
-            {/* Snoozed until */}
+            {/* Reminder date */}
             {loop.status === "snoozed" && loop.snoozed_until && (
               <div class="mb-6 flex items-center gap-2 text-sm text-amber-400">
                 <AlarmClock class="w-4 h-4" />
-                Snoozed until {new Date(loop.snoozed_until).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                Remind me {new Date(loop.snoozed_until).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
               </div>
             )}
 
@@ -252,7 +252,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
                     class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm text-amber-400 bg-amber-400/10 hover:bg-amber-400/20 transition-colors"
                   >
                     <AlarmClock class="w-4 h-4" />
-                    Snooze
+                    Remind me
                   </button>
                 </>
               )}
@@ -290,9 +290,10 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
               </div>
             )}
 
-            {/* Snooze date picker */}
+            {/* Reminder date picker */}
             {showSnooze && (
               <div class="mb-6">
+                <label class="text-xs text-[var(--text-muted)] mb-1 block">Remind me on</label>
                 <div class="flex gap-2">
                   <input
                     type="date"
@@ -304,7 +305,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
                     onClick={handleSnooze}
                     class="px-4 py-2 rounded-lg text-sm font-medium bg-amber-600 text-white hover:bg-amber-500 transition-colors"
                   >
-                    Snooze
+                    Set reminder
                   </button>
                   <button
                     onClick={() => setShowSnooze(false)}
