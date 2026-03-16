@@ -204,13 +204,17 @@ export function SwipeableCard({ children, leftActions: leftActionsProp, rightAct
   const pillClass = "flex flex-col items-center justify-center gap-1 cursor-pointer border-0 rounded-2xl";
 
   const pillDynamic = (progress: number, index: number, total: number) => {
-    const segmentSize = 1 / total;
-    const segmentStart = index * segmentSize;
-    const localProgress = Math.min(1, Math.max(0, (progress - segmentStart) / segmentSize));
+    // Stagger start points but give each button a wide ramp (70% of total range)
+    // so they ease in gradually with overlap rather than popping abruptly
+    const staggerStart = total <= 1 ? 0 : (index / (total - 1)) * 0.4;
+    const rampSize = total <= 1 ? 1 : 0.7;
+    const localProgress = Math.min(1, Math.max(0, (progress - staggerStart) / rampSize));
+    // Apply an ease-out curve for smoother deceleration
+    const eased = 1 - Math.pow(1 - localProgress, 2.5);
     return {
-      transform: `scale(${0.3 + localProgress * 0.7})`,
-      opacity: localProgress,
-      transition: isDragging ? "none" : "transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.2s ease-out",
+      transform: `scale(${0.3 + eased * 0.7})`,
+      opacity: eased,
+      transition: isDragging ? "none" : "transform 0.35s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease-out",
     };
   };
 
