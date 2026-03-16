@@ -144,16 +144,16 @@ export function SwipeableCard({ children, leftActions: leftActionsProp, rightAct
       return;
     }
 
-    // Normal snap
+    // Normal snap — close if user dragged SNAP_THRESHOLD from revealed position
     if (revealed === "left") {
-      if (offsetX > -SNAP_THRESHOLD) {
+      if (offsetX > -(leftRevealWidth - SNAP_THRESHOLD)) {
         reset();
         if (activeReset.value === reset) activeReset.value = null;
       } else {
         setOffsetX(-leftRevealWidth);
       }
     } else if (revealed === "right") {
-      if (offsetX < SNAP_THRESHOLD) {
+      if (offsetX < rightRevealWidth - SNAP_THRESHOLD) {
         reset();
         if (activeReset.value === reset) activeReset.value = null;
       } else {
