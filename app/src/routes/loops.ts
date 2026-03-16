@@ -54,13 +54,13 @@ loopsRouter.get("/", async (c) => {
     source_preview: string | null;
   }>(
     `SELECT l.*,
-       (SELECT count(*) FROM open_loop_evidence WHERE loop_id = l.id) as evidence_count,
-       (SELECT max(noted_at) FROM open_loop_evidence WHERE loop_id = l.id) as last_evidence_at,
+       (SELECT count(*) FROM open_loop_evidence ole JOIN thoughts t ON t.id = ole.thought_id AND t.deleted_at IS NULL WHERE ole.loop_id = l.id) as evidence_count,
+       (SELECT max(ole.noted_at) FROM open_loop_evidence ole JOIN thoughts t ON t.id = ole.thought_id AND t.deleted_at IS NULL WHERE ole.loop_id = l.id) as last_evidence_at,
        sp.source_preview
      FROM open_loops l
      LEFT JOIN LATERAL (
        SELECT left(t.content, 80) as source_preview
-       FROM thoughts t WHERE t.id = l.source_thought_id
+       FROM thoughts t WHERE t.id = l.source_thought_id AND t.deleted_at IS NULL
      ) sp ON true
      WHERE ${conditions.join(" AND ")}
      ORDER BY l.created_at DESC
@@ -113,7 +113,7 @@ loopsRouter.get("/:id", async (c) => {
     `SELECT t.id, t.content, t.metadata, t.created_at, e.noted_at
      FROM open_loop_evidence e
      JOIN thoughts t ON t.id = e.thought_id
-     WHERE e.loop_id = $1
+     WHERE e.loop_id = $1 AND t.deleted_at IS NULL
      ORDER BY e.noted_at DESC`,
     [id],
   );
