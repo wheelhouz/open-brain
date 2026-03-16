@@ -7,4 +7,5 @@ export const config = {
   extractionModel: process.env.EXTRACTION_MODEL || "openai/gpt-4o-mini",
   chatModel: process.env.CHAT_MODEL || "anthropic/claude-sonnet-4-6",
   maxContentLength: 50 * 1024, // 50KB
-} as const;
+  entityFuzzyThreshold: parseFloat(process.env.ENTITY_FUZZY_THRESHOLD || "0.35"),
+};

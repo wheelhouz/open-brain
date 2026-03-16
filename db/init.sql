@@ -3,6 +3,7 @@
 -- Runs against the default POSTGRES_DB (open_brain). A dev database is created at the end.
 
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE IF NOT EXISTS thoughts (
     id         UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -118,6 +119,9 @@ CREATE INDEX IF NOT EXISTS idx_entities_aliases
 CREATE INDEX IF NOT EXISTS idx_entities_embedding
     ON entities USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
+
+CREATE INDEX IF NOT EXISTS idx_entities_canonical_name_trgm
+    ON entities USING gin (canonical_name gin_trgm_ops);
 
 -- Entity Mentions (links entities to thoughts)
 CREATE TABLE IF NOT EXISTS entity_mentions (

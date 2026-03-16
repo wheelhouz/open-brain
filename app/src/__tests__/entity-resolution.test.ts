@@ -9,6 +9,10 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("../config.js", () => ({
+  config: { entityFuzzyThreshold: 0.35 },
+}));
+
 describe("resolveEntityMentions", () => {
   beforeEach(() => vi.resetAllMocks());
 
@@ -50,6 +54,8 @@ describe("resolveEntityMentions", () => {
       .mockResolvedValueOnce({ rows: [] })
       // No alias match
       .mockResolvedValueOnce({ rows: [] })
+      // No fuzzy match
+      .mockResolvedValueOnce({ rows: [] })
       // Create new entity
       .mockResolvedValueOnce({ rows: [{ id: "new-entity" }] })
       // Upsert mention
@@ -58,10 +64,10 @@ describe("resolveEntityMentions", () => {
     await resolveEntityMentions(["NewPerson"], "thought-1");
 
     // Verify INSERT into entities
-    expect(mockQuery.mock.calls[2][0]).toContain("INSERT INTO entities");
-    expect(mockQuery.mock.calls[2][1]).toEqual(["NewPerson"]);
+    expect(mockQuery.mock.calls[3][0]).toContain("INSERT INTO entities");
+    expect(mockQuery.mock.calls[3][1]).toEqual(["NewPerson"]);
     // Verify mention linked to new entity
-    expect(mockQuery.mock.calls[3][1]).toEqual(["new-entity", "thought-1"]);
+    expect(mockQuery.mock.calls[4][1]).toEqual(["new-entity", "thought-1"]);
   });
 
   it("handles case insensitivity", async () => {
@@ -94,7 +100,8 @@ describe("resolveEntityMentions", () => {
       // Alice: exact match
       .mockResolvedValueOnce({ rows: [{ id: "entity-1" }] })
       .mockResolvedValueOnce({ rows: [] })
-      // Bob: no exact, no alias, create new
+      // Bob: no exact, no alias, no fuzzy, create new
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ id: "entity-2" }] })
@@ -102,8 +109,8 @@ describe("resolveEntityMentions", () => {
 
     await resolveEntityMentions(["Alice", "Bob"], "thought-1");
 
-    // 2 queries for Alice (exact match + mention) + 4 for Bob (exact + alias + create + mention)
-    expect(mockQuery).toHaveBeenCalledTimes(6);
+    // 2 queries for Alice (exact match + mention) + 5 for Bob (exact + alias + fuzzy + create + mention)
+    expect(mockQuery).toHaveBeenCalledTimes(7);
   });
 
   it("is idempotent — duplicate mentions use ON CONFLICT DO NOTHING", async () => {
@@ -114,5 +121,73 @@ describe("resolveEntityMentions", () => {
     await resolveEntityMentions(["Alice"], "thought-1");
 
     expect(mockQuery.mock.calls[1][0]).toContain("ON CONFLICT DO NOTHING");
+  });
+
+  it("fuzzy matches entity above threshold and appends alias", async () => {
+    mockQuery
+      // No exact match
+      .mockResolvedValueOnce({ rows: [] })
+      // No alias match
+      .mockResolvedValueOnce({ rows: [] })
+      // Fuzzy match above threshold
+      .mockResolvedValueOnce({ rows: [{ id: "entity-bob", sim: 0.5 }] })
+      // Append alias
+      .mockResolvedValueOnce({ rows: [] })
+      // Upsert mention
+      .mockResolvedValueOnce({ rows: [] });
+
+    await resolveEntityMentions(["Bobby"], "thought-1");
+
+    // Verify fuzzy query uses similarity
+    expect(mockQuery.mock.calls[2][0]).toContain("similarity");
+    expect(mockQuery.mock.calls[2][1]).toEqual(["Bobby"]);
+    // Verify alias append
+    expect(mockQuery.mock.calls[3][0]).toContain("array_append");
+    expect(mockQuery.mock.calls[3][1]).toEqual(["Bobby", "entity-bob"]);
+    // Verify mention linked to fuzzy-matched entity
+    expect(mockQuery.mock.calls[4][1]).toEqual(["entity-bob", "thought-1"]);
+  });
+
+  it("creates new entity when fuzzy match is below threshold", async () => {
+    mockQuery
+      // No exact match
+      .mockResolvedValueOnce({ rows: [] })
+      // No alias match
+      .mockResolvedValueOnce({ rows: [] })
+      // Fuzzy match below threshold
+      .mockResolvedValueOnce({ rows: [{ id: "entity-far", sim: 0.2 }] })
+      // Create new entity
+      .mockResolvedValueOnce({ rows: [{ id: "new-entity" }] })
+      // Upsert mention
+      .mockResolvedValueOnce({ rows: [] });
+
+    await resolveEntityMentions(["Xenomorph"], "thought-1");
+
+    // Should NOT append alias (sim too low)
+    expect(mockQuery.mock.calls[3][0]).toContain("INSERT INTO entities");
+    expect(mockQuery.mock.calls[3][1]).toEqual(["Xenomorph"]);
+    expect(mockQuery.mock.calls[4][1]).toEqual(["new-entity", "thought-1"]);
+  });
+
+  it("fuzzy match alias append uses correct query with dedup guard", async () => {
+    mockQuery
+      // No exact match
+      .mockResolvedValueOnce({ rows: [] })
+      // No alias match
+      .mockResolvedValueOnce({ rows: [] })
+      // Fuzzy match hit
+      .mockResolvedValueOnce({ rows: [{ id: "entity-alex", sim: 0.45 }] })
+      // Append alias
+      .mockResolvedValueOnce({ rows: [] })
+      // Upsert mention
+      .mockResolvedValueOnce({ rows: [] });
+
+    await resolveEntityMentions(["Alexander"], "thought-1");
+
+    // Verify the UPDATE query includes the dedup guard
+    const aliasQuery = mockQuery.mock.calls[3][0];
+    expect(aliasQuery).toContain("array_append");
+    expect(aliasQuery).toContain("NOT ($1 = ANY(aliases))");
+    expect(mockQuery.mock.calls[3][1]).toEqual(["Alexander", "entity-alex"]);
   });
 });
