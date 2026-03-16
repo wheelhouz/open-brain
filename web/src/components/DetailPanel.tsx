@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { selectedThoughtId, lastDeletedId, showToast } from "../state";
+import { selectedThoughtId, selectedLoopId, lastDeletedId, showToast } from "../state";
 import { api, type Thought, type Loop } from "../api";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThoughtCard } from "./ThoughtCard";
@@ -457,6 +457,7 @@ export function DetailPanel() {
                         class="text-sm flex items-start gap-2 leading-relaxed cursor-pointer hover:bg-[var(--surface-hover)] rounded-md px-1.5 py-1 -mx-1.5 transition-colors"
                         onClick={() => {
                           selectedThoughtId.value = null;
+                          selectedLoopId.value = loop.id;
                           route("/loops?id=" + loop.id + "&status=" + loop.status);
                         }}
                       >
