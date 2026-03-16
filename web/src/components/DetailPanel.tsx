@@ -461,7 +461,7 @@ export function DetailPanel() {
                         }}
                       >
                         <span class={`mt-0.5 flex-shrink-0 text-xs ${loop.status === "closed" ? "text-green-500" : loop.status === "snoozed" ? "text-yellow-500" : "text-[var(--type-task)]"}`}>
-                          {loop.status === "closed" ? "\u2713" : loop.status === "snoozed" ? "\u23F8" : "\u2022"}
+                          {loop.status === "closed" ? "\u2713" : loop.status === "snoozed" ? "\u23F8\uFE0E" : "\u2022"}
                         </span>
                         <span class={loop.status === "closed" ? "text-[var(--text-muted)] line-through" : "text-[var(--text-secondary)]"}>
                           {loop.content}

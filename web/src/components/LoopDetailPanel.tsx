@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "preact/hooks";
-import { route } from "preact-router";
-import { selectedLoopId, showToast } from "../state";
+import { selectedLoopId, selectedThoughtId, showToast } from "../state";
 import { api, type Loop, type Thought } from "../api";
 import { BottomSheet } from "./BottomSheet";
+import { DetailPanel } from "./DetailPanel";
 import { ThoughtCard } from "./ThoughtCard";
 import { typeColors, typeLabels, typeIcons } from "./LoopCard";
 import { relativeTime } from "../lib/format";
@@ -73,13 +73,11 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        close();
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
+      if (e.key === "q" || e.key === "Escape") {
+        if (!selectedThoughtId.value) {
+          e.preventDefault();
+          close();
+        }
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -331,8 +329,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
                       thought={t}
                       badge={loop.evidence!.length > 1 && loop.source_thought_id === t.id ? "Source" : undefined}
                       onClick={() => {
-                        selectedLoopId.value = null;
-                        route("/?thought=" + t.id);
+                        selectedThoughtId.value = t.id;
                       }}
                     />
                   ))}
@@ -388,34 +385,40 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   // Mobile: bottom sheet
   if (isMobile) {
     return (
-      <BottomSheet onClose={close}>
-        {panelInner}
-      </BottomSheet>
+      <>
+        <BottomSheet onClose={close}>
+          {panelInner}
+        </BottomSheet>
+        <DetailPanel />
+      </>
     );
   }
 
   // Desktop: side panel
   return (
-    <div
-      class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
-      onClick={close}
-    >
-      <div class="absolute inset-0 bg-black/40" />
+    <>
       <div
-        ref={contentRef}
-        class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
-        onClick={(e) => e.stopPropagation()}
+        class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+        onClick={close}
       >
-        {/* Close button */}
-        <button
-          onClick={close}
-          class="sticky top-0 float-right m-3 z-10 p-2 rounded-lg bg-[var(--bg-secondary)]/80 backdrop-blur-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors"
-          title="Close (q)"
+        <div class="absolute inset-0 bg-black/40" />
+        <div
+          ref={contentRef}
+          class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
+          onClick={(e) => e.stopPropagation()}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-        {panelInner}
+          {/* Close button */}
+          <button
+            onClick={close}
+            class="sticky top-0 float-right m-3 z-10 p-2 rounded-lg bg-[var(--bg-secondary)]/80 backdrop-blur-sm hover:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors"
+            title="Close (q)"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+          {panelInner}
+        </div>
       </div>
-    </div>
+      <DetailPanel />
+    </>
   );
 }
