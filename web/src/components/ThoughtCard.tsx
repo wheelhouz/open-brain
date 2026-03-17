@@ -4,7 +4,7 @@ import { extractHeadline, plainTextPreview } from "../lib/markdown";
 import { typeColor, typeLabel, relativeTime } from "../lib/format";
 import { SimilarityBar } from "./SimilarityBar";
 import {
-  Eye, CheckSquare, Lightbulb, BookOpen, User, Scale, Users, MessageCircle,
+  Eye, CheckSquare, Lightbulb, BookOpen, User, Scale, Users, MessageCircle, Unlink,
   type LucideIcon,
 } from "lucide-preact";
 
@@ -21,6 +21,7 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
 interface ThoughtCardProps {
   thought: Thought;
   onClick?: () => void;
+  onRemove?: () => void;
   selected?: boolean;
   similarity?: number;
   badge?: string;
@@ -29,6 +30,7 @@ interface ThoughtCardProps {
 export function ThoughtCard({
   thought,
   onClick,
+  onRemove,
   selected,
   similarity,
   badge,
@@ -91,9 +93,20 @@ export function ThoughtCard({
                 </span>
               )}
             </div>
-            <span class="text-xs text-[var(--text-muted)] flex-shrink-0">
-              {relativeTime(thought.created_at)}
-            </span>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <span class="text-xs text-[var(--text-muted)]">
+                {relativeTime(thought.created_at)}
+              </span>
+              {onRemove && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                  class="p-0.5 rounded text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title="Unlink"
+                >
+                  <Unlink class="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Headline — primary selection anchor */}

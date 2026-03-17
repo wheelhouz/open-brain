@@ -43,6 +43,10 @@ export function DetailPanel() {
   const [addingNote, setAddingNote] = useState(false);
   const [noteContent, setNoteContent] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [linkLoopOpen, setLinkLoopOpen] = useState(false);
+  const [allLoops, setAllLoops] = useState<Loop[]>([]);
+  const [loopFilter, setLoopFilter] = useState("");
+  const loopFilterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!id) {
@@ -60,6 +64,8 @@ export function DetailPanel() {
     setEditContent("");
     setAddingNote(false);
     setNoteContent("");
+    setLinkLoopOpen(false);
+    setLoopFilter("");
 
     Promise.all([
       api.thought(id),
@@ -208,6 +214,33 @@ export function DetailPanel() {
       document.removeEventListener("keydown", onKey, true);
     };
   }, [discussOpen]);
+
+  // Fetch open loops when link picker opens
+  useEffect(() => {
+    if (linkLoopOpen) {
+      api.loops("open").then((res) => setAllLoops(res.loops)).catch(() => {});
+      setTimeout(() => loopFilterRef.current?.focus(), 50);
+    }
+  }, [linkLoopOpen]);
+
+  const handleLinkToLoop = async (loopId: string) => {
+    if (!thought) return;
+    try {
+      await api.linkEvidence(loopId, thought.id);
+      const updated = await api.loopsByThought(thought.id);
+      setLoops(updated.loops);
+      setLinkLoopOpen(false);
+      setLoopFilter("");
+      showToast("Linked to loop", "success");
+    } catch {
+      showToast("Failed to link to loop", "error");
+    }
+  };
+
+  const filteredLoops = allLoops.filter((l) =>
+    l.content.toLowerCase().includes(loopFilter.toLowerCase()) &&
+    !loops.some((existing) => existing.id === l.id),
+  );
 
   const typeAccent = typeColor(thought?.metadata?.type);
 
@@ -445,11 +478,64 @@ export function DetailPanel() {
               )}
 
               {/* Loops (action items) */}
-              {loops.length > 0 ? (
-                <div class="mt-4">
-                  <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                    Loops ({loops.length})
+              <div class="mt-4">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                    Loops{loops.length > 0 ? ` (${loops.length})` : ""}
                   </h4>
+                  {!linkLoopOpen && (
+                    <button
+                      onClick={() => setLinkLoopOpen(true)}
+                      class="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                    >
+                      <Plus class="w-3 h-3" />
+                      Link to loop
+                    </button>
+                  )}
+                </div>
+
+                {/* Link to loop picker */}
+                {linkLoopOpen && (
+                  <div class="mb-3">
+                    <input
+                      ref={loopFilterRef}
+                      type="text"
+                      value={loopFilter}
+                      onInput={(e) => setLoopFilter((e.target as HTMLInputElement).value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setLinkLoopOpen(false);
+                          setLoopFilter("");
+                        }
+                      }}
+                      placeholder="Filter open loops..."
+                      class="w-full text-sm px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--accent)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none mb-2"
+                    />
+                    <div class="max-h-48 overflow-y-auto space-y-1">
+                      {filteredLoops.length > 0 ? filteredLoops.slice(0, 10).map((l) => (
+                        <button
+                          key={l.id}
+                          onClick={() => handleLinkToLoop(l.id)}
+                          class="w-full text-left text-sm px-2.5 py-1.5 rounded-md hover:bg-[var(--surface-hover)] text-[var(--text-secondary)] transition-colors flex items-start gap-2"
+                        >
+                          <span class="text-[var(--type-task)] mt-0.5 flex-shrink-0">{"\u2022"}</span>
+                          <span class="line-clamp-2">{l.content}</span>
+                          <span class="text-[10px] text-[var(--text-muted)] mt-0.5 flex-shrink-0 capitalize">{l.loop_type.replace("_", " ")}</span>
+                        </button>
+                      )) : (
+                        <p class="text-xs text-[var(--text-muted)] px-2 py-1">No matching loops</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setLinkLoopOpen(false); setLoopFilter(""); }}
+                      class="mt-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+
+                {loops.length > 0 ? (
                   <ul class="space-y-1.5">
                     {loops.map((loop) => (
                       <li
@@ -473,12 +559,7 @@ export function DetailPanel() {
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : thought.metadata?.action_items && thought.metadata.action_items.length > 0 ? (
-                <div class="mt-4">
-                  <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                    Action Items
-                  </h4>
+                ) : !linkLoopOpen && thought.metadata?.action_items && thought.metadata.action_items.length > 0 ? (
                   <ul class="space-y-1.5">
                     {thought.metadata.action_items.map((item, i) => (
                       <li
@@ -490,8 +571,10 @@ export function DetailPanel() {
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : null}
+                ) : !linkLoopOpen ? (
+                  <p class="text-xs text-[var(--text-muted)]">No loops linked</p>
+                ) : null}
+              </div>
 
               {/* Source */}
               {thought.metadata?.source_context && (

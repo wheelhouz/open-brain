@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { selectedLoopId, selectedThoughtId, showToast } from "../state";
 import { api, type Loop, type Thought } from "../api";
 import { BottomSheet } from "./BottomSheet";
@@ -7,7 +7,7 @@ import { ThoughtCard } from "./ThoughtCard";
 import { typeColors, typeLabels, typeIcons } from "./LoopCard";
 import { relativeTime } from "../lib/format";
 import {
-  Check, AlarmClock, RotateCcw, Trash2,
+  Check, AlarmClock, RotateCcw, Trash2, Plus, Search, X,
 } from "lucide-preact";
 
 function useMobileDetect() {
@@ -34,6 +34,14 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   const [resolution, setResolution] = useState("");
   const [showSnooze, setShowSnooze] = useState(false);
   const [snoozeDate, setSnoozeDate] = useState("");
+  const [linkSearchOpen, setLinkSearchOpen] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkResults, setLinkResults] = useState<Thought[]>([]);
+  const [linkSearching, setLinkSearching] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteContent, setNoteContent] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +56,11 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     setShowResolution(false);
     setResolution("");
     setShowSnooze(false);
+    setLinkSearchOpen(false);
+    setLinkQuery("");
+    setLinkResults([]);
+    setAddingNote(false);
+    setNoteContent("");
 
     api.loop(id).then((data) => {
       setLoop(data);
@@ -155,6 +168,74 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
       onLoopChanged?.();
     } catch {
       showToast("Failed to delete loop", "error");
+    }
+  };
+
+  // Debounced search for linking thoughts
+  useEffect(() => {
+    if (!linkQuery.trim()) {
+      setLinkResults([]);
+      return;
+    }
+    setLinkSearching(true);
+    const timer = setTimeout(() => {
+      api.search(linkQuery.trim(), undefined, 5)
+        .then((res) => setLinkResults(res.results))
+        .catch(() => setLinkResults([]))
+        .finally(() => setLinkSearching(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [linkQuery]);
+
+  // Focus search input when opened
+  useEffect(() => {
+    if (linkSearchOpen) linkInputRef.current?.focus();
+  }, [linkSearchOpen]);
+
+  const handleLinkThought = async (thoughtId: string) => {
+    if (!loop) return;
+    try {
+      await api.linkEvidence(loop.id, thoughtId);
+      const updated = await api.loop(loop.id);
+      setLoop(updated);
+      setLinkSearchOpen(false);
+      setLinkQuery("");
+      setLinkResults([]);
+      showToast("Thought linked", "success");
+    } catch {
+      showToast("Failed to link thought", "error");
+    }
+  };
+
+  const handleUnlinkEvidence = async (thoughtId: string) => {
+    if (!loop) return;
+    try {
+      await api.unlinkEvidence(loop.id, thoughtId);
+      setLoop({
+        ...loop,
+        evidence: loop.evidence?.filter((t) => t.id !== thoughtId),
+      });
+      showToast("Evidence removed", "success");
+    } catch {
+      showToast("Failed to unlink", "error");
+    }
+  };
+
+  const handleAddNote = async () => {
+    if (!loop || !noteContent.trim() || savingNote) return;
+    setSavingNote(true);
+    try {
+      const captured = await api.capture(noteContent.trim(), "loop_evidence");
+      await api.linkEvidence(loop.id, captured.id);
+      const updated = await api.loop(loop.id);
+      setLoop(updated);
+      setNoteContent("");
+      setAddingNote(false);
+      showToast("Note added & linked", "success");
+    } catch {
+      showToast("Failed to add note", "error");
+    } finally {
+      setSavingNote(false);
     }
   };
 
@@ -318,11 +399,117 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
             )}
 
             {/* Evidence thoughts */}
-            {loop.evidence && loop.evidence.length > 0 && (
-              <div class="mt-6 pt-4 border-t border-[var(--border-color)]">
-                <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-3">
-                  Linked Thoughts ({loop.evidence.length})
+            <div class="mt-6 pt-4 border-t border-[var(--border-color)]">
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider">
+                  Linked Thoughts{loop.evidence && loop.evidence.length > 0 ? ` (${loop.evidence.length})` : ""}
                 </h4>
+                {!linkSearchOpen && !addingNote && (
+                  <div class="flex items-center gap-2">
+                    <button
+                      onClick={() => setLinkSearchOpen(true)}
+                      class="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                    >
+                      <Search class="w-3 h-3" />
+                      Link thought
+                    </button>
+                    <button
+                      onClick={() => setAddingNote(true)}
+                      class="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                    >
+                      <Plus class="w-3 h-3" />
+                      Add note
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Link thought search */}
+              {linkSearchOpen && (
+                <div class="mb-3">
+                  <div class="relative">
+                    <input
+                      ref={linkInputRef}
+                      type="text"
+                      value={linkQuery}
+                      onInput={(e) => setLinkQuery((e.target as HTMLInputElement).value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          setLinkSearchOpen(false);
+                          setLinkQuery("");
+                          setLinkResults([]);
+                        }
+                      }}
+                      placeholder="Search thoughts to link..."
+                      class="w-full text-sm px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--accent)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                    />
+                    <button
+                      onClick={() => { setLinkSearchOpen(false); setLinkQuery(""); setLinkResults([]); }}
+                      class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                    >
+                      <X class="w-4 h-4" />
+                    </button>
+                  </div>
+                  {linkSearching && (
+                    <p class="text-xs text-[var(--text-muted)] mt-2">Searching...</p>
+                  )}
+                  {linkResults.length > 0 && (
+                    <div class="mt-2 space-y-1.5 max-h-60 overflow-y-auto">
+                      {linkResults.map((t) => (
+                        <ThoughtCard
+                          key={t.id}
+                          thought={t}
+                          onClick={() => handleLinkThought(t.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {linkQuery.trim() && !linkSearching && linkResults.length === 0 && (
+                    <p class="text-xs text-[var(--text-muted)] mt-2">No results</p>
+                  )}
+                </div>
+              )}
+
+              {/* Add note as evidence */}
+              {addingNote && (
+                <div class="mb-3">
+                  <textarea
+                    value={noteContent}
+                    onInput={(e) => setNoteContent((e.target as HTMLTextAreaElement).value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        handleAddNote();
+                      }
+                      if (e.key === "Escape") {
+                        setAddingNote(false);
+                        setNoteContent("");
+                      }
+                    }}
+                    placeholder="Write a note to link as evidence..."
+                    class="w-full px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] resize-y"
+                    style={{ minHeight: "5rem" }}
+                    autoFocus
+                  />
+                  <div class="flex justify-end gap-2 mt-2">
+                    <button
+                      onClick={() => { setAddingNote(false); setNoteContent(""); }}
+                      class="px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleAddNote}
+                      disabled={!noteContent.trim() || savingNote}
+                      class="px-4 py-1.5 rounded-lg text-xs font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50 transition-colors"
+                    >
+                      {savingNote ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {loop.evidence && loop.evidence.length > 0 ? (
                 <div class="space-y-2">
                   {loop.evidence.map((t) => (
                     <ThoughtCard
@@ -332,11 +519,14 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
                       onClick={() => {
                         selectedThoughtId.value = t.id;
                       }}
+                      onRemove={loop.source_thought_id !== t.id ? () => handleUnlinkEvidence(t.id) : undefined}
                     />
                   ))}
                 </div>
-              </div>
-            )}
+              ) : !linkSearchOpen && !addingNote ? (
+                <p class="text-xs text-[var(--text-muted)]">No linked thoughts yet</p>
+              ) : null}
+            </div>
 
             {/* Metadata */}
             <div class="mt-6 pt-4 border-t border-[var(--border-color)]">

@@ -280,6 +280,18 @@ export const api = {
       method: "DELETE",
     }),
 
+  linkEvidence: (loopId: string, thoughtId: string) =>
+    request<{ linked: boolean }>(`/api/loops/${loopId}/evidence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thought_id: thoughtId }),
+    }),
+
+  unlinkEvidence: (loopId: string, thoughtId: string) =>
+    request<{ removed: boolean }>(`/api/loops/${loopId}/evidence/${thoughtId}`, {
+      method: "DELETE",
+    }),
+
   entities: (type?: string) => {
     const search = new URLSearchParams();
     if (type) search.set("type", type);

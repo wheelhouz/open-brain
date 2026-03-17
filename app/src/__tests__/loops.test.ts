@@ -347,3 +347,33 @@ describe("POST /api/loops/:id/evidence", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("DELETE /api/loops/:id/evidence/:thoughtId", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("unlinks a thought from evidence", async () => {
+    mockQuery.mockResolvedValue({ rowCount: 1 });
+
+    const res = await app.request("/api/loops/loop-1/evidence/thought-1", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.removed).toBe(true);
+    expect(mockQuery).toHaveBeenCalledWith(
+      expect.stringContaining("DELETE FROM open_loop_evidence"),
+      ["loop-1", "thought-1"],
+    );
+  });
+
+  it("returns 404 for non-existent evidence link", async () => {
+    mockQuery.mockResolvedValue({ rowCount: 0 });
+
+    const res = await app.request("/api/loops/loop-1/evidence/nonexistent", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(404);
+  });
+});

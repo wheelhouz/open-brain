@@ -16,9 +16,10 @@ loopsRouter.get("/", async (c) => {
   let idx = 1;
 
   if (sourceThoughtId) {
-    // When filtering by source thought, return all statuses
-    conditions.push(`source_thought_id = $${idx++}`);
+    // When filtering by thought, return all statuses — includes source AND evidence links
+    conditions.push(`(source_thought_id = $${idx} OR l.id IN (SELECT loop_id FROM open_loop_evidence WHERE thought_id = $${idx}))`);
     params.push(sourceThoughtId);
+    idx++;
   } else if (status === "open") {
     // Open query includes snoozed loops past their snoozed_until date
     conditions.push(`(status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`);
@@ -251,4 +252,21 @@ loopsRouter.post("/:id/evidence", async (c) => {
   );
 
   return c.json({ linked: true });
+});
+
+// Unlink thought from evidence
+loopsRouter.delete("/:id/evidence/:thoughtId", async (c) => {
+  const id = c.req.param("id");
+  const thoughtId = c.req.param("thoughtId");
+
+  const result = await query(
+    `DELETE FROM open_loop_evidence WHERE loop_id = $1 AND thought_id = $2`,
+    [id, thoughtId],
+  );
+
+  if (result.rowCount === 0) {
+    return c.json({ error: "Evidence link not found" }, 404);
+  }
+
+  return c.json({ removed: true });
 });
