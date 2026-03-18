@@ -2429,7 +2429,7 @@ git add web/src/components/FactCard.tsx
 git commit -m "feat: add FactCard component with status badges and evidence"
 ```
 
-### Task 13: Build FactSection component
+### Task 13: Build FactSection component [DONE]
 
 **Files:**
 - Create: `web/src/components/FactSection.tsx`
@@ -2450,7 +2450,7 @@ git add web/src/components/FactSection.tsx
 git commit -m "feat: add FactSection with loading skeleton and manual entry"
 ```
 
-### Task 14: Build SuggestionTray component
+### Task 14: Build SuggestionTray component [DONE]
 
 **Files:**
 - Create: `web/src/components/SuggestionTray.tsx`
@@ -2472,7 +2472,7 @@ git add web/src/components/SuggestionTray.tsx
 git commit -m "feat: add SuggestionTray for pending fact review"
 ```
 
-### Task 15: Build ConflictCard component
+### Task 15: Build ConflictCard component [DONE]
 
 **Files:**
 - Create: `web/src/components/ConflictCard.tsx`
@@ -2501,7 +2501,7 @@ git commit -m "feat: add ConflictCard for inline conflict resolution"
 
 ## Phase 11: Frontend — Integration
 
-### Task 16: Integrate facts into EntityDetailPanel
+### Task 16: Integrate facts into EntityDetailPanel [DONE]
 
 **Files:**
 - Modify: `web/src/components/EntityDetailPanel.tsx`
@@ -2534,7 +2534,7 @@ git add web/src/components/EntityDetailPanel.tsx
 git commit -m "feat: integrate fact section and suggestion tray into entity detail"
 ```
 
-### Task 17: Add pending suggestion badges
+### Task 17: Add pending suggestion badges [DONE]
 
 **Files:**
 - Modify: `web/src/views/PeopleView.tsx`
@@ -2565,7 +2565,7 @@ git add web/src/views/PeopleView.tsx
 git commit -m "feat: add pending suggestion badges to entity cards and nav"
 ```
 
-### Task 18: Wire entity chat to pass entity_id
+### Task 18: Wire entity chat to pass entity_id [DONE]
 
 **Files:**
 - Modify: `web/src/views/ChatView.tsx`
@@ -2594,7 +2594,7 @@ git commit -m "feat: wire entity-scoped chat with entity_id context"
 
 ## Phase 12: Final Integration & Verification
 
-### Task 19: Run full test suite and fix any failures
+### Task 19: Run full test suite and fix any failures [DONE]
 
 **Step 1: Run all tests**
 
