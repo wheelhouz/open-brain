@@ -84,6 +84,7 @@ export function PeopleView(_props: RoutableProps) {
               aliases: [p.person],
               attributes: {},
               mention_count: p.count,
+              fact_count: 0,
               last_seen: p.last_seen,
               created_at: p.last_seen,
             })),
