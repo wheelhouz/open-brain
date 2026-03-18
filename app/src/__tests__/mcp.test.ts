@@ -218,12 +218,14 @@ describe("MCP fact tools", () => {
     expect(body.result.content[0].text).toContain("tentative/pending");
   });
 
-  it("add_entity_fact returns conflict when conflicting fact exists", async () => {
+  it("add_entity_fact creates disputed fact when conflicting fact exists", async () => {
     const sessionId = await mcpInit();
     mockQuery.mockReset();
     mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: "e1", canonical_name: "Maya" }] })
-      .mockResolvedValueOnce({ rows: [{ id: "f-old", predicate: "from", object_display_text: "Seattle", status: "active" }] });
+      .mockResolvedValueOnce({ rows: [{ id: "e1", canonical_name: "Maya" }] }) // entity lookup
+      .mockResolvedValueOnce({ rows: [{ id: "f-old", predicate: "from", object_display_text: "Seattle", status: "active" }] }) // existing check
+      .mockResolvedValueOnce({ rows: [{ id: "f-new" }] }) // insert disputed fact
+      .mockResolvedValueOnce({ rows: [] }); // mark existing as disputed
 
     const res = await mcpCall(sessionId, "tools/call", {
       name: "add_entity_fact",
@@ -232,7 +234,11 @@ describe("MCP fact tools", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.result.content[0].text).toContain("Conflict");
-    expect(body.result.content[0].text).toContain("Seattle");
+    expect(body.result.content[0].text).toContain("disputed");
+    // Verify the insert used 'disputed' status
+    expect(mockQuery.mock.calls[2][0]).toContain("disputed");
+    // Verify existing fact was marked disputed
+    expect(mockQuery.mock.calls[3][0]).toContain("disputed");
   });
 
   it("review_entity_fact accepts a pending fact", async () => {

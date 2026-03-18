@@ -287,6 +287,7 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
               entityId={entity.id}
               onFactChanged={() => setFactKey((k) => k + 1)}
               onThoughtClick={(id) => { selectedThoughtId.value = id; }}
+              onConflict={(newFact, existing) => setConflict({ newFact, existing })}
             />
 
             {/* Suggestions */}
@@ -294,7 +295,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
               key={`suggestions-${entityId}-${factKey}`}
               entityId={entity.id}
               onConflict={(newFact, existing) => setConflict({ newFact, existing })}
-              onChanged={() => setFactKey((k) => k + 1)}
+              onChanged={() => { setFactKey((k) => k + 1); setConflict(null); }}
+              onThoughtClick={(id) => { selectedThoughtId.value = id; }}
             />
 
             {/* Conflict resolution */}

@@ -462,7 +462,7 @@ export function createMcpServer(): McpServer {
         return { content: [{ type: "text" as const, text: "Provide entity_name or entity_id" }] };
       }
 
-      let sql = `SELECT * FROM entity_facts WHERE entity_id = $1`;
+      let sql = `SELECT id, entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, valid_at_start, valid_at_end, created_at, updated_at FROM entity_facts WHERE entity_id = $1`;
       const params: unknown[] = [resolvedId];
       let idx = 2;
 
@@ -568,17 +568,40 @@ export function createMcpServer(): McpServer {
         (f: any) => f.status === "active" || f.status === "disputed",
       );
 
+      const embeddingText = renderFactEmbeddingText(entity.canonical_name, normalizedPredicate, displayText);
+      const embedding = await generateEmbedding(embeddingText);
+
       if (conflict) {
+        // Create as disputed and mark existing as disputed too
+        const result = await query(
+          `INSERT INTO entity_facts (entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, embedding)
+           VALUES ($1, $2, $3, $4, 'disputed', 'pending', $5, $6, $7)
+           RETURNING id`,
+          [entity.id, normalizedPredicate, JSON.stringify({ value }), displayText, confidence || (isManual ? 1.0 : 0.8), source_kind, pgvector.toSql(embedding)],
+        );
+
+        if (conflict.status !== "disputed") {
+          await query(
+            `UPDATE entity_facts SET status = 'disputed', updated_at = now() WHERE id = $1`,
+            [conflict.id],
+          );
+        }
+
+        if (note) {
+          await query(
+            `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type)
+             VALUES ($1, $2, $3)`,
+            [result.rows[0].id, note, isManual ? "manual" : "extraction"],
+          );
+        }
+
         return {
           content: [{
             type: "text" as const,
-            text: `Conflict: existing fact "${entity.canonical_name} — ${conflict.predicate} — ${conflict.object_display_text}" (${conflict.status}). Use review_entity_fact or resolve_fact_conflict to handle this.`,
+            text: `Conflict: added "${displayText}" as disputed. Existing: "${conflict.object_display_text}" (now also disputed). Use resolve_fact_conflict with fact_id="${result.rows[0].id}" to resolve.`,
           }],
         };
       }
-
-      const embeddingText = renderFactEmbeddingText(entity.canonical_name, normalizedPredicate, displayText);
-      const embedding = await generateEmbedding(embeddingText);
 
       const status = isManual ? "active" : "tentative";
       const reviewState = isManual ? "accepted" : "pending";
@@ -616,9 +639,9 @@ export function createMcpServer(): McpServer {
       action: z.enum(["accept", "reject"]).describe("Accept or reject the fact"),
       note: z.string().optional().describe("Optional note for audit trail"),
     },
-    async ({ fact_id, action }) => {
+    async ({ fact_id, action, note }) => {
       const fact = await query(
-        `SELECT ef.*, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
+        `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
         [fact_id],
       );
       if (fact.rows.length === 0) {
@@ -632,6 +655,12 @@ export function createMcpServer(): McpServer {
 
       if (action === "reject") {
         await query(`UPDATE entity_facts SET review_state = 'rejected', updated_at = now() WHERE id = $1`, [fact_id]);
+        if (note) {
+          await query(
+            `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+            [fact_id, note],
+          );
+        }
         return { content: [{ type: "text" as const, text: `Rejected: ${f.canonical_name} — ${f.predicate} — ${f.object_display_text}` }] };
       }
 
@@ -653,6 +682,12 @@ export function createMcpServer(): McpServer {
       }
 
       await query(`UPDATE entity_facts SET status = 'active', review_state = 'accepted', updated_at = now() WHERE id = $1`, [fact_id]);
+      if (note) {
+        await query(
+          `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+          [fact_id, note],
+        );
+      }
       return { content: [{ type: "text" as const, text: `Accepted: ${f.canonical_name} — ${f.predicate} — ${f.object_display_text}` }] };
     },
   );
@@ -668,7 +703,7 @@ export function createMcpServer(): McpServer {
     },
     async ({ fact_id, action }) => {
       const newFact = await query(
-        `SELECT ef.*, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
+        `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
         [fact_id],
       );
       if (newFact.rows.length === 0) {

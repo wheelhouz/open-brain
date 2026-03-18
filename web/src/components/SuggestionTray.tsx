@@ -1,21 +1,25 @@
 import { useState, useEffect, useCallback } from "preact/hooks";
 import { api, type EntityFact, type FactEvidence } from "../api";
 import { showToast } from "../state";
+import { relativeTime } from "../lib/format";
 import { ChevronDown, ChevronUp, CheckCircle, XCircle, Pencil, Sparkles } from "lucide-preact";
 
 interface SuggestionTrayProps {
   entityId: string;
   onConflict?: (newFact: EntityFact, conflictWith: { id: string; predicate: string; object_display_text: string; status: string }) => void;
   onChanged?: () => void;
+  onThoughtClick?: (thoughtId: string) => void;
 }
 
-export function SuggestionTray({ entityId, onConflict, onChanged }: SuggestionTrayProps) {
+export function SuggestionTray({ entityId, onConflict, onChanged, onThoughtClick }: SuggestionTrayProps) {
   const [suggestions, setSuggestions] = useState<EntityFact[]>([]);
   const [expanded, setExpanded] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPredicate, setEditPredicate] = useState("");
   const [editValue, setEditValue] = useState("");
   const [dismissing, setDismissing] = useState<Set<string>>(new Set());
+  const [expandedEvidence, setExpandedEvidence] = useState<Set<string>>(new Set());
+  const [evidenceMap, setEvidenceMap] = useState<Map<string, FactEvidence[]>>(new Map());
 
   const load = useCallback(() => {
     api
@@ -25,6 +29,23 @@ export function SuggestionTray({ entityId, onConflict, onChanged }: SuggestionTr
   }, [entityId]);
 
   useEffect(load, [load]);
+
+  const toggleEvidence = async (factId: string) => {
+    const isExpanded = expandedEvidence.has(factId);
+    setExpandedEvidence((prev) => {
+      const s = new Set(prev);
+      isExpanded ? s.delete(factId) : s.add(factId);
+      return s;
+    });
+    if (!isExpanded && !evidenceMap.has(factId)) {
+      try {
+        const r = await api.entityFactDetail(entityId, factId);
+        setEvidenceMap((prev) => new Map(prev).set(factId, r.evidence));
+      } catch {
+        // silent
+      }
+    }
+  };
 
   const handleAccept = async (fact: EntityFact) => {
     try {
@@ -189,7 +210,49 @@ export function SuggestionTray({ entityId, onConflict, onChanged }: SuggestionTr
                         </p>
                       )}
                     </div>
+                    <button
+                      onClick={() => toggleEvidence(fact.id)}
+                      class="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] cursor-pointer"
+                      title={expandedEvidence.has(fact.id) ? "Collapse" : "Show evidence"}
+                    >
+                      {expandedEvidence.has(fact.id)
+                        ? <ChevronUp class="w-4 h-4" />
+                        : <ChevronDown class="w-4 h-4" />}
+                    </button>
                   </div>
+                  {expandedEvidence.has(fact.id) && (
+                    <div class="mt-2 pt-2 border-t border-amber-200/50 dark:border-amber-800/30 space-y-1">
+                      {!evidenceMap.has(fact.id) ? (
+                        <div class="h-4 w-32 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+                      ) : (evidenceMap.get(fact.id) || []).length === 0 ? (
+                        <p class="text-xs text-[var(--text-muted)]">No evidence recorded</p>
+                      ) : (
+                        <>
+                          <p class="text-xs font-medium text-[var(--text-muted)]">Evidence ({(evidenceMap.get(fact.id) || []).length})</p>
+                          {(evidenceMap.get(fact.id) || []).map((e) => (
+                            <div key={e.id} class="text-xs text-[var(--text-secondary)] pl-2 border-l-2 border-amber-300 dark:border-amber-700">
+                              {e.excerpt && <p class="italic">"{e.excerpt}"</p>}
+                              <p class="text-[var(--text-muted)] mt-0.5">
+                                {e.evidence_type}
+                                {e.thought_id && onThoughtClick && (
+                                  <>
+                                    {" "}
+                                    <button
+                                      onClick={() => onThoughtClick(e.thought_id!)}
+                                      class="text-[var(--accent)] hover:underline cursor-pointer"
+                                    >
+                                      View source
+                                    </button>
+                                  </>
+                                )}
+                                {" "}&middot; {relativeTime(e.created_at)}
+                              </p>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div class="flex items-center gap-2 mt-2">
                     <button
                       onClick={() => handleAccept(fact)}

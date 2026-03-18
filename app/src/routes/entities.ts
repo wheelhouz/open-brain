@@ -29,18 +29,20 @@ entitiesRouter.get("/", async (c) => {
     aliases: string[];
     attributes: unknown;
     mention_count: string;
+    fact_count: string;
     last_seen: string | null;
     created_at: string;
   }>(
     `SELECT e.*,
-            count(em.thought_id) as mention_count,
+            count(DISTINCT em.thought_id) as mention_count,
+            (SELECT count(*) FROM entity_facts ef WHERE ef.entity_id = e.id AND ef.review_state != 'rejected') as fact_count,
             max(t.created_at) as last_seen
      FROM entities e
      LEFT JOIN entity_mentions em ON em.entity_id = e.id
      LEFT JOIN thoughts t ON t.id = em.thought_id AND t.deleted_at IS NULL
      ${where}
      GROUP BY e.id
-     ORDER BY count(em.thought_id) DESC
+     ORDER BY count(DISTINCT em.thought_id) DESC
      LIMIT $${idx}`,
     params,
   );
@@ -49,6 +51,7 @@ entitiesRouter.get("/", async (c) => {
     entities: result.rows.map((r) => ({
       ...r,
       mention_count: parseInt(r.mention_count, 10),
+      fact_count: parseInt(r.fact_count, 10),
     })),
   });
 });

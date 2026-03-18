@@ -12,11 +12,13 @@ function EntityCard({
   selected,
   onClick,
   pendingCount,
+  factCount,
 }: {
   entity: Entity;
   selected?: boolean;
   onClick: () => void;
   pendingCount?: number;
+  factCount?: number;
 }) {
   return (
     <div
@@ -51,6 +53,7 @@ function EntityCard({
         )}
         <p class="text-xs text-[var(--text-muted)]">
           {entity.mention_count} thought{entity.mention_count !== 1 ? "s" : ""}
+          {factCount != null && factCount > 0 && <> &middot; {factCount} fact{factCount !== 1 ? "s" : ""}</>}
           {entity.last_seen && <> &middot; {relativeTime(entity.last_seen)}</>}
         </p>
       </div>
@@ -154,6 +157,7 @@ export function PeopleView(_props: RoutableProps) {
               selected={selectedId === entity.id}
               onClick={() => setSelectedId(selectedId === entity.id ? "" : entity.id)}
               pendingCount={pendingCounts.get(entity.id)}
+              factCount={entity.fact_count}
             />
           ))}
         </div>

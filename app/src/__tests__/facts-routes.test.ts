@@ -291,8 +291,9 @@ describe("POST /api/entities/:entityId/facts/:factId/resolve-conflict", () => {
     expect(body.resolved).toBe(true);
     // Verify new fact set to active
     expect(mockQuery.mock.calls[2][0]).toContain("active");
-    // Verify old fact set to superseded
+    // Verify old fact set to superseded with review_state accepted
     expect(mockQuery.mock.calls[3][0]).toContain("superseded");
+    expect(mockQuery.mock.calls[3][0]).toContain("review_state = 'accepted'");
   });
 
   it("mark_old_as_past: old superseded with valid_at_end", async () => {
@@ -342,6 +343,68 @@ describe("POST /api/entities/:entityId/facts/:factId/resolve-conflict", () => {
     // 2 queries: fact lookup + accept pending
     expect(mockQuery).toHaveBeenCalledTimes(2);
     expect(mockQuery.mock.calls[1][0]).toContain("review_state = 'accepted'");
+  });
+});
+
+describe("DELETE /api/entities/:entityId/facts/:factId", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+  });
+
+  it("deletes a fact and returns success", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "fact-1", predicate: "from", status: "active" }] }) // lookup
+      .mockResolvedValueOnce({ rows: [] }); // delete
+
+    const res = await app.request("/api/entities/e1/facts/fact-1", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deleted).toBe(true);
+    expect(mockQuery.mock.calls[1][0]).toContain("DELETE FROM entity_facts");
+  });
+
+  it("returns 404 when fact not found", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+
+    const res = await app.request("/api/entities/e1/facts/missing", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("restores disputed counterpart to active when deleting a disputed fact", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "fact-1", predicate: "lives_in", status: "disputed" }] }) // lookup
+      .mockResolvedValueOnce({ rows: [] }) // restore counterpart
+      .mockResolvedValueOnce({ rows: [] }); // delete
+
+    const res = await app.request("/api/entities/e1/facts/fact-1", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    // Should restore counterpart to active before deleting
+    expect(mockQuery.mock.calls[1][0]).toContain("status = 'active'");
+    expect(mockQuery.mock.calls[1][0]).toContain("status = 'disputed'");
+    expect(mockQuery.mock.calls[2][0]).toContain("DELETE FROM entity_facts");
+  });
+
+  it("does not restore counterparts for non-disputed facts", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "fact-1", predicate: "from", status: "active" }] }) // lookup
+      .mockResolvedValueOnce({ rows: [] }); // delete
+
+    await app.request("/api/entities/e1/facts/fact-1", {
+      method: "DELETE",
+      headers: AUTH,
+    });
+    // Only 2 queries: lookup + delete (no counterpart restore)
+    expect(mockQuery).toHaveBeenCalledTimes(2);
   });
 });
 

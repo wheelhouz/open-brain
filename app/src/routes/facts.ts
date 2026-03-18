@@ -12,7 +12,7 @@ factsRouter.get("/", async (c) => {
   const status = c.req.query("status");
   const reviewState = c.req.query("review_state");
 
-  let sql = `SELECT * FROM entity_facts WHERE entity_id = $1`;
+  let sql = `SELECT id, entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, valid_at_start, valid_at_end, created_at, updated_at FROM entity_facts WHERE entity_id = $1`;
   const params: unknown[] = [entityId];
   let paramIdx = 2;
 
@@ -48,7 +48,7 @@ factsRouter.get("/:factId", async (c) => {
   const entityId = c.req.param("entityId");
 
   const factResult = await query(
-    `SELECT * FROM entity_facts WHERE id = $1 AND entity_id = $2`,
+    `SELECT id, entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, valid_at_start, valid_at_end, created_at, updated_at FROM entity_facts WHERE id = $1 AND entity_id = $2`,
     [factId, entityId],
   );
   if (factResult.rows.length === 0) return c.json({ error: "Fact not found" }, 404);
@@ -340,7 +340,7 @@ factsRouter.post("/:factId/resolve-conflict", async (c) => {
         [factId],
       );
       await query(
-        `UPDATE entity_facts SET status = 'superseded', valid_at_end = now(), updated_at = now() WHERE id = $1`,
+        `UPDATE entity_facts SET status = 'superseded', review_state = 'accepted', valid_at_end = now(), updated_at = now() WHERE id = $1`,
         [oldFactId],
       );
       break;
@@ -361,6 +361,35 @@ factsRouter.post("/:factId/resolve-conflict", async (c) => {
   return c.json({ resolved: true, action: body.action });
 });
 
+// DELETE /api/entities/:entityId/facts/:factId
+factsRouter.delete("/:factId", async (c) => {
+  const factId = c.req.param("factId");
+  const entityId = c.req.param("entityId");
+
+  const factResult = await query<{ id: string; predicate: string; status: string }>(
+    `SELECT id, predicate, status FROM entity_facts WHERE id = $1 AND entity_id = $2`,
+    [factId, entityId],
+  );
+  if (factResult.rows.length === 0) return c.json({ error: "Fact not found" }, 404);
+
+  const fact = factResult.rows[0];
+
+  // If deleting a disputed fact, restore the counterpart to active
+  if (fact.status === "disputed") {
+    await query(
+      `UPDATE entity_facts SET status = 'active', updated_at = now()
+       WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+         AND status = 'disputed' AND review_state != 'rejected'`,
+      [entityId, fact.predicate, factId],
+    );
+  }
+
+  // Evidence rows cascade-delete via FK
+  await query(`DELETE FROM entity_facts WHERE id = $1`, [factId]);
+
+  return c.json({ deleted: true });
+});
+
 export const pendingFactsRouter = new Hono();
 
 // GET /api/facts/pending
@@ -368,7 +397,7 @@ pendingFactsRouter.get("/", async (c) => {
   const limit = Math.min(parseInt(c.req.query("limit") || "20"), 50);
   const cursor = c.req.query("cursor");
 
-  let sql = `SELECT ef.*, e.canonical_name as entity_name
+  let sql = `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name as entity_name
      FROM entity_facts ef
      JOIN entities e ON e.id = ef.entity_id
      WHERE ef.review_state = 'pending'`;

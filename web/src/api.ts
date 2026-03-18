@@ -84,6 +84,7 @@ export interface Entity {
   aliases: string[];
   attributes: Record<string, unknown>;
   mention_count: number;
+  fact_count: number;
   last_seen: string | null;
   created_at: string;
 }
@@ -434,6 +435,11 @@ export const api = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+    }),
+
+  deleteFact: (entityId: string, factId: string) =>
+    request<{ deleted: boolean }>(`/api/entities/${entityId}/facts/${factId}`, {
+      method: "DELETE",
     }),
 
   resolveConflict: (entityId: string, factId: string, action: string, note?: string) =>

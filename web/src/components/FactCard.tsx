@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import type { EntityFact, FactEvidence } from "../api";
 import { relativeTime } from "../lib/format";
-import { ChevronDown, ChevronUp, Clock, AlertTriangle, CheckCircle, XCircle, Pencil } from "lucide-preact";
+import { ChevronDown, ChevronUp, Clock, AlertTriangle, CheckCircle, XCircle, Pencil, Trash2 } from "lucide-preact";
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
   active: { color: "text-green-600", bg: "bg-green-100 dark:bg-green-900/30", label: "Active" },
@@ -15,8 +15,9 @@ interface FactCardProps {
   evidence?: FactEvidence[];
   onAccept?: () => void;
   onReject?: () => void;
-  onResolve?: (action: string) => void;
+  onResolve?: () => void;
   onEdit?: (data: { predicate?: string; object_display_text?: string }) => void;
+  onDelete?: () => void;
   onExpand?: () => void;
   onThoughtClick?: (thoughtId: string) => void;
   showActions?: boolean;
@@ -29,6 +30,7 @@ export function FactCard({
   onReject,
   onResolve,
   onEdit,
+  onDelete,
   onExpand,
   onThoughtClick,
   showActions = true,
@@ -181,7 +183,7 @@ export function FactCard({
                 )}
                 {fact.status === "disputed" && onResolve && (
                   <button
-                    onClick={() => onResolve("replace_existing_with_new")}
+                    onClick={() => onResolve!()}
                     class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors cursor-pointer"
                   >
                     <AlertTriangle class="w-3 h-3" /> Resolve
@@ -193,6 +195,14 @@ export function FactCard({
                     class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded text-[var(--text-muted)] hover:bg-[var(--surface-hover)] transition-colors cursor-pointer"
                   >
                     <Pencil class="w-3 h-3" /> Edit
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    onClick={() => { if (confirm("Delete this fact? This cannot be undone.")) onDelete(); }}
+                    class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded text-[var(--text-muted)] hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors cursor-pointer"
+                  >
+                    <Trash2 class="w-3 h-3" /> Delete
                   </button>
                 )}
               </div>

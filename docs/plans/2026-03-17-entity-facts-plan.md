@@ -2615,7 +2615,7 @@ git add -A
 git commit -m "fix: resolve test failures from entity facts integration"
 ```
 
-### Task 20: Manual smoke test
+### Task 20: Manual smoke test [DONE]
 
 **Step 1: Start dev server**
 
@@ -2645,7 +2645,7 @@ Test via MCP client:
 - `add_entity_fact` with a new claim
 - `review_entity_fact` to accept/reject
 
-### Task 21: Commit and finalize
+### Task 21: Commit and finalize [DONE]
 
 **Step 1: Final commit**
 

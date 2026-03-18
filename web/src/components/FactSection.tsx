@@ -8,6 +8,7 @@ interface FactSectionProps {
   entityId: string;
   onFactChanged?: () => void;
   onThoughtClick?: (thoughtId: string) => void;
+  onConflict?: (fact: EntityFact, counterpart: { id: string; predicate: string; object_display_text: string; status: string }) => void;
 }
 
 interface GroupedFacts {
@@ -41,7 +42,7 @@ function groupByPredicate(facts: EntityFact[]): GroupedFacts[] {
     });
 }
 
-export function FactSection({ entityId, onFactChanged, onThoughtClick }: FactSectionProps) {
+export function FactSection({ entityId, onFactChanged, onThoughtClick, onConflict }: FactSectionProps) {
   const [facts, setFacts] = useState<EntityFact[]>([]);
   const [evidenceMap, setEvidenceMap] = useState<Map<string, FactEvidence[]>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -114,14 +115,34 @@ export function FactSection({ entityId, onFactChanged, onThoughtClick }: FactSec
     }
   };
 
-  const handleResolve = async (factId: string, action: string) => {
+  const handleDelete = async (factId: string) => {
     try {
-      await api.resolveConflict(entityId, factId, action);
+      await api.deleteFact(entityId, factId);
       loadFacts();
       onFactChanged?.();
-      showToast("Conflict resolved", "success");
+      showToast("Fact deleted", "success");
     } catch {
-      showToast("Failed to resolve conflict", "error");
+      showToast("Failed to delete fact", "error");
+    }
+  };
+
+  const handleResolve = async (fact: EntityFact) => {
+    if (onConflict) {
+      // Fetch all facts for this entity to find the disputed counterpart
+      // (it may be pending, so not in our local filtered list)
+      try {
+        const all = await api.entityFacts(entityId);
+        const counterpart = all.facts.find(
+          (f) => f.id !== fact.id && f.predicate.toLowerCase() === fact.predicate.toLowerCase()
+            && f.status === "disputed" && f.review_state !== "rejected",
+        );
+        if (counterpart) {
+          onConflict(fact, counterpart);
+          return;
+        }
+      } catch {
+        showToast("Failed to load conflict details", "error");
+      }
     }
   };
 
@@ -219,7 +240,8 @@ export function FactSection({ entityId, onFactChanged, onThoughtClick }: FactSec
                 fact={fact}
                 evidence={evidenceMap.get(fact.id)}
                 onEdit={(data) => handleEdit(fact.id, data)}
-                onResolve={(action) => handleResolve(fact.id, action)}
+                onDelete={() => handleDelete(fact.id)}
+                onResolve={() => handleResolve(fact)}
                 onExpand={() => loadEvidence(fact.id)}
                 onThoughtClick={(id) => onThoughtClick?.(id)}
                 showActions={true}
