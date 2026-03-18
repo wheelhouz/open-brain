@@ -8,4 +8,5 @@ export const config = {
   chatModel: process.env.CHAT_MODEL || "anthropic/claude-sonnet-4-6",
   maxContentLength: 50 * 1024, // 50KB
   entityFuzzyThreshold: parseFloat(process.env.ENTITY_FUZZY_THRESHOLD || "0.35"),
+  factConfidenceThreshold: parseFloat(process.env.FACT_CONFIDENCE_THRESHOLD || "0.80"),
 };
