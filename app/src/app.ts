@@ -14,6 +14,7 @@ import { peopleRouter } from "./routes/people.js";
 import { chatRouter } from "./routes/chat.js";
 import { loopsRouter } from "./routes/loops.js";
 import { entitiesRouter } from "./routes/entities.js";
+import { pendingFactsRouter } from "./routes/facts.js";
 import { backfillRouter } from "./routes/backfill.js";
 import { oauthRouter, wellKnownOAuth } from "./routes/oauth.js";
 import { readFile } from "node:fs/promises";
@@ -50,6 +51,7 @@ api.route("/topics", topicsRouter);
 api.route("/people", peopleRouter);
 api.route("/chat", chatRouter);
 api.route("/loops", loopsRouter);
+api.route("/facts/pending", pendingFactsRouter);
 api.route("/entities", entitiesRouter);
 api.route("/backfill", backfillRouter);
 

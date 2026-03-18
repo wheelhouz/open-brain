@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
+import { factsRouter } from "./facts.js";
 
 export const entitiesRouter = new Hono();
 
@@ -288,3 +289,5 @@ entitiesRouter.get("/:id/thoughts", async (c) => {
     next_cursor: hasMore ? thoughts[thoughts.length - 1].created_at : null,
   });
 });
+
+entitiesRouter.route("/:entityId/facts", factsRouter);
