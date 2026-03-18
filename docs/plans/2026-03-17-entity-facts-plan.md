@@ -1023,7 +1023,7 @@ git commit -m "feat: wire fact extraction into capture pipeline"
 
 ## Phase 5: Fact API Routes
 
-### Task 7: Implement fact CRUD routes
+### Task 7: Implement fact CRUD routes [DONE]
 
 **Files:**
 - Create: `app/src/routes/facts.ts`
@@ -1521,7 +1521,7 @@ git commit -m "feat: add fact CRUD routes with accept/reject/resolve-conflict"
 
 ## Phase 6: Merge Extension
 
-### Task 8: Extend entity merge to unify facts
+### Task 8: Extend entity merge to unify facts [DONE]
 
 **Files:**
 - Modify: `app/src/routes/entities.ts:173-246` (merge endpoint)
@@ -1621,7 +1621,7 @@ git commit -m "feat: extend entity merge to unify facts and evidence"
 
 ## Phase 7: MCP Tools
 
-### Task 9: Add fact-related MCP tools
+### Task 9: Add fact-related MCP tools [DONE]
 
 **Files:**
 - Modify: `app/src/mcp.ts`
@@ -1976,7 +1976,7 @@ git commit -m "feat: add MCP tools for entity facts (list, add, review, resolve)
 
 ## Phase 8: Entity Chat Grounding
 
-### Task 10: Implement entity-grounded chat
+### Task 10: Implement entity-grounded chat [DONE]
 
 **Files:**
 - Modify: `app/src/routes/chat.ts`
