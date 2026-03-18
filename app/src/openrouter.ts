@@ -70,6 +70,12 @@ const EXTRACTION_PROMPT = `You are a thought classifier. Given the following tho
         "confidence": 0.0-1.0 how explicitly the fact is stated (1.0 = directly stated, 0.5 = implied),
         "excerpt": the specific text that supports this fact
     Only include facts explicitly stated in the text. Do not infer unstated facts. Empty array if none.
+
+    Example: "Had coffee with Maya. She's from Porto and works at Anthropic." →
+    fact_candidates: [
+        {"entity": "Maya", "predicate": "from", "value": "Porto", "display": "Porto", "confidence": 1.0, "excerpt": "She's from Porto"},
+        {"entity": "Maya", "predicate": "works_at", "value": "Anthropic", "display": "Anthropic", "confidence": 1.0, "excerpt": "works at Anthropic"}
+    ]
 }
 
 action_items loop_type values:
