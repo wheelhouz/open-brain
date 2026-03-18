@@ -76,7 +76,7 @@ describe("processFactCandidates", () => {
 
   it("skips candidates for unresolved entities", async () => {
     const unresolvedMap: MentionResolution[] = [
-      { ...mentionMap[0], resolution_state: "new_entity_created" },
+      { ...mentionMap[0], resolution_state: "pending_review" },
     ];
 
     await processFactCandidates(

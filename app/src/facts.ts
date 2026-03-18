@@ -71,7 +71,7 @@ export async function processFactCandidates(
   thoughtId: string,
   mentionMap: MentionResolution[],
 ): Promise<void> {
-  const autoLinkedStates = new Set(["auto_linked_exact", "auto_linked_alias", "auto_linked_fuzzy"]);
+  const autoLinkedStates = new Set(["auto_linked_exact", "auto_linked_alias", "auto_linked_fuzzy", "new_entity_created"]);
   const mentionLookup = new Map(mentionMap.map((m) => [m.normalized_mention_text, m]));
 
   for (const candidate of candidates) {
