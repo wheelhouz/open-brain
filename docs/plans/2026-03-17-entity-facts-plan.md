@@ -2405,7 +2405,7 @@ git commit -m "feat: extend API client with fact CRUD methods"
 
 ## Phase 10: Frontend — Fact Components
 
-### Task 12: Build FactCard component
+### Task 12: Build FactCard component [DONE]
 
 **Files:**
 - Create: `web/src/components/FactCard.tsx`
