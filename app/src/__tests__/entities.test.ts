@@ -241,6 +241,10 @@ describe("POST /api/entities/merge", () => {
       .mockResolvedValueOnce({ rows: [{ id: "tgt", canonical_name: "Robert", aliases: ["Robert", "Rob"] }] })
       // Reassign mentions
       .mockResolvedValueOnce({ rows: [] })
+      // Source facts
+      .mockResolvedValueOnce({ rows: [] })
+      // Target facts
+      .mockResolvedValueOnce({ rows: [] })
       // Update target aliases
       .mockResolvedValueOnce({ rows: [] })
       // Update thoughts metadata
@@ -257,14 +261,114 @@ describe("POST /api/entities/merge", () => {
     const body = await res.json();
     expect(body.merged).toBe(true);
     expect(body.target_id).toBe("tgt");
-    // Merged aliases include all unique values + source canonical_name
     expect(body.aliases).toContain("Robert");
     expect(body.aliases).toContain("Rob");
     expect(body.aliases).toContain("Bob");
     expect(body.aliases).toContain("Bobby");
-    // Delete source entity
-    expect(mockQuery.mock.calls[5][0]).toContain("DELETE FROM entities");
-    expect(mockQuery.mock.calls[5][1]).toEqual(["src"]);
+  });
+
+  it("moves facts from source to target entity", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "src", canonical_name: "Bob", aliases: ["Bob"] }] })
+      .mockResolvedValueOnce({ rows: [{ id: "tgt", canonical_name: "Robert", aliases: ["Robert"] }] })
+      .mockResolvedValueOnce({ rows: [] }) // reassign mentions
+      .mockResolvedValueOnce({ rows: [{ id: "sf1", predicate: "works_at", object_display_text: "Acme", status: "active" }] }) // source facts
+      .mockResolvedValueOnce({ rows: [] }) // target facts (no match)
+      .mockResolvedValueOnce({ rows: [] }) // move fact to target
+      .mockResolvedValueOnce({ rows: [] }) // update aliases
+      .mockResolvedValueOnce({ rows: [] }) // update thoughts
+      .mockResolvedValueOnce({ rows: [] }); // delete source
+
+    const res = await app.request("/api/entities/merge", {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: "src", target_id: "tgt" }),
+    });
+    expect(res.status).toBe(200);
+    // Verify fact was moved to target
+    const moveCall = mockQuery.mock.calls[5];
+    expect(moveCall[0]).toContain("UPDATE entity_facts SET entity_id");
+    expect(moveCall[1]).toContain("tgt");
+    expect(moveCall[1]).toContain("sf1");
+  });
+
+  it("deduplicates same-meaning facts and merges evidence", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "src", canonical_name: "Bob", aliases: ["Bob"] }] })
+      .mockResolvedValueOnce({ rows: [{ id: "tgt", canonical_name: "Robert", aliases: ["Robert"] }] })
+      .mockResolvedValueOnce({ rows: [] }) // reassign mentions
+      .mockResolvedValueOnce({ rows: [{ id: "sf1", predicate: "from", object_display_text: "Porto", status: "tentative" }] }) // source facts
+      .mockResolvedValueOnce({ rows: [{ id: "tf1", predicate: "from", object_display_text: "Porto", status: "tentative" }] }) // target facts (same meaning)
+      .mockResolvedValueOnce({ rows: [] }) // move evidence
+      .mockResolvedValueOnce({ rows: [] }) // delete source fact
+      .mockResolvedValueOnce({ rows: [] }) // update aliases
+      .mockResolvedValueOnce({ rows: [] }) // update thoughts
+      .mockResolvedValueOnce({ rows: [] }); // delete source
+
+    const res = await app.request("/api/entities/merge", {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: "src", target_id: "tgt" }),
+    });
+    expect(res.status).toBe(200);
+    // Evidence moved to target fact
+    const evidenceCall = mockQuery.mock.calls[5];
+    expect(evidenceCall[0]).toContain("UPDATE entity_fact_evidence SET fact_id");
+    expect(evidenceCall[1]).toEqual(["tf1", "sf1"]);
+    // Source fact deleted
+    const deleteCall = mockQuery.mock.calls[6];
+    expect(deleteCall[0]).toContain("DELETE FROM entity_facts");
+    expect(deleteCall[1]).toEqual(["sf1"]);
+  });
+
+  it("keeps stronger status on deduplicated facts (active > tentative)", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "src", canonical_name: "Bob", aliases: ["Bob"] }] })
+      .mockResolvedValueOnce({ rows: [{ id: "tgt", canonical_name: "Robert", aliases: ["Robert"] }] })
+      .mockResolvedValueOnce({ rows: [] }) // reassign mentions
+      .mockResolvedValueOnce({ rows: [{ id: "sf1", predicate: "from", object_display_text: "Porto", status: "active" }] }) // source: active
+      .mockResolvedValueOnce({ rows: [{ id: "tf1", predicate: "from", object_display_text: "Porto", status: "tentative" }] }) // target: tentative
+      .mockResolvedValueOnce({ rows: [] }) // move evidence
+      .mockResolvedValueOnce({ rows: [] }) // update target fact status to active
+      .mockResolvedValueOnce({ rows: [] }) // delete source fact
+      .mockResolvedValueOnce({ rows: [] }) // update aliases
+      .mockResolvedValueOnce({ rows: [] }) // update thoughts
+      .mockResolvedValueOnce({ rows: [] }); // delete source
+
+    const res = await app.request("/api/entities/merge", {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: "src", target_id: "tgt" }),
+    });
+    expect(res.status).toBe(200);
+    // Target fact status updated to active (stronger)
+    const statusCall = mockQuery.mock.calls[6];
+    expect(statusCall[0]).toContain("UPDATE entity_facts SET status");
+    expect(statusCall[1]).toContain("active");
+    expect(statusCall[1]).toContain("tf1");
+  });
+
+  it("does not collapse similar-but-not-identical facts", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "src", canonical_name: "Bob", aliases: ["Bob"] }] })
+      .mockResolvedValueOnce({ rows: [{ id: "tgt", canonical_name: "Robert", aliases: ["Robert"] }] })
+      .mockResolvedValueOnce({ rows: [] }) // reassign mentions
+      .mockResolvedValueOnce({ rows: [{ id: "sf1", predicate: "from", object_display_text: "Porto", status: "active" }] }) // source
+      .mockResolvedValueOnce({ rows: [{ id: "tf1", predicate: "from", object_display_text: "Lisbon", status: "active" }] }) // target (different value)
+      .mockResolvedValueOnce({ rows: [] }) // move fact (not deduplicate)
+      .mockResolvedValueOnce({ rows: [] }) // update aliases
+      .mockResolvedValueOnce({ rows: [] }) // update thoughts
+      .mockResolvedValueOnce({ rows: [] }); // delete source
+
+    const res = await app.request("/api/entities/merge", {
+      method: "POST",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: "src", target_id: "tgt" }),
+    });
+    expect(res.status).toBe(200);
+    // Should move, not merge
+    const moveCall = mockQuery.mock.calls[5];
+    expect(moveCall[0]).toContain("UPDATE entity_facts SET entity_id");
   });
 });
 

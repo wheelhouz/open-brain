@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
 import { factsRouter } from "./facts.js";
+import { normalizePredicate } from "../facts.js";
 
 export const entitiesRouter = new Hono();
 
@@ -215,6 +216,61 @@ entitiesRouter.post("/merge", async (c) => {
      AND thought_id NOT IN (SELECT thought_id FROM entity_mentions WHERE entity_id = $1)`,
     [body.target_id, body.source_id],
   );
+
+  // Unify facts from source into target
+  const STATUS_PRECEDENCE: Record<string, number> = {
+    active: 0,
+    tentative: 1,
+    disputed: 2,
+    superseded: 3,
+  };
+
+  const [sourceFacts, targetFacts] = await Promise.all([
+    query<{ id: string; predicate: string; object_display_text: string; status: string }>(
+      `SELECT id, predicate, object_display_text, status FROM entity_facts WHERE entity_id = $1 AND review_state != 'rejected'`,
+      [body.source_id],
+    ),
+    query<{ id: string; predicate: string; object_display_text: string; status: string }>(
+      `SELECT id, predicate, object_display_text, status FROM entity_facts WHERE entity_id = $1 AND review_state != 'rejected'`,
+      [body.target_id],
+    ),
+  ]);
+
+  for (const sourceFact of sourceFacts.rows) {
+    const targetMatch = targetFacts.rows.find(
+      (tf) =>
+        normalizePredicate(tf.predicate) === normalizePredicate(sourceFact.predicate) &&
+        tf.object_display_text.trim().toLowerCase() === sourceFact.object_display_text.trim().toLowerCase(),
+    );
+
+    if (targetMatch) {
+      // Same-meaning: merge evidence onto target fact, keep stronger status
+      await query(
+        `UPDATE entity_fact_evidence SET fact_id = $1 WHERE fact_id = $2`,
+        [targetMatch.id, sourceFact.id],
+      );
+
+      const keepStatus = (STATUS_PRECEDENCE[targetMatch.status] ?? 3) <= (STATUS_PRECEDENCE[sourceFact.status] ?? 3)
+        ? targetMatch.status
+        : sourceFact.status;
+
+      if (keepStatus !== targetMatch.status) {
+        await query(
+          `UPDATE entity_facts SET status = $1, updated_at = now() WHERE id = $2`,
+          [keepStatus, targetMatch.id],
+        );
+      }
+
+      // Delete the source fact (evidence already moved)
+      await query(`DELETE FROM entity_facts WHERE id = $1`, [sourceFact.id]);
+    } else {
+      // Different fact: move to target entity
+      await query(
+        `UPDATE entity_facts SET entity_id = $1, updated_at = now() WHERE id = $2`,
+        [body.target_id, sourceFact.id],
+      );
+    }
+  }
 
   // Update target aliases
   await query(
