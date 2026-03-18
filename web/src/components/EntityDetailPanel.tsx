@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { api, type Entity, type Thought } from "../api";
+import { api, type Entity, type EntityFact, type Thought } from "../api";
 import { selectedThoughtId, showToast } from "../state";
 import { BottomSheet } from "./BottomSheet";
 import { ThoughtCard } from "./ThoughtCard";
 import { SwipeableCard } from "./SwipeableCard";
 import { DetailPanel } from "./DetailPanel";
+import { FactSection } from "./FactSection";
+import { SuggestionTray } from "./SuggestionTray";
+import { ConflictCard } from "./ConflictCard";
 import { relativeTime } from "../lib/format";
-import { User, Pencil, X } from "lucide-preact";
+import { User, Pencil, X, MessageCircle } from "lucide-preact";
 
 function useMobileDetect() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
@@ -33,6 +36,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [factKey, setFactKey] = useState(0);
+  const [conflict, setConflict] = useState<{ newFact: EntityFact; existing: { id: string; predicate: string; object_display_text: string; status: string } } | null>(null);
   const editRef = useRef<HTMLInputElement>(null);
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -47,6 +52,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
 
     setLoading(true);
     setEditing(false);
+    setConflict(null);
+    setFactKey(0);
 
     Promise.all([
       api.entity(entityId),
@@ -273,6 +280,43 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
                 </div>
               </div>
             )}
+
+            {/* Facts section */}
+            <FactSection
+              key={`facts-${entityId}-${factKey}`}
+              entityId={entity.id}
+              onFactChanged={() => setFactKey((k) => k + 1)}
+              onThoughtClick={(id) => { selectedThoughtId.value = id; }}
+            />
+
+            {/* Suggestions */}
+            <SuggestionTray
+              key={`suggestions-${entityId}-${factKey}`}
+              entityId={entity.id}
+              onConflict={(newFact, existing) => setConflict({ newFact, existing })}
+              onChanged={() => setFactKey((k) => k + 1)}
+            />
+
+            {/* Conflict resolution */}
+            {conflict && (
+              <ConflictCard
+                entityId={entity.id}
+                newFact={conflict.newFact}
+                existingFact={conflict.existing}
+                onResolved={() => { setConflict(null); setFactKey((k) => k + 1); }}
+                onCancel={() => setConflict(null)}
+              />
+            )}
+
+            {/* Chat about entity */}
+            <div class="mb-5">
+              <a
+                href={`/chat?entity_id=${entity.id}`}
+                class="inline-flex items-center gap-1.5 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+              >
+                <MessageCircle class="w-3.5 h-3.5" /> Chat about {entity.canonical_name}
+              </a>
+            </div>
 
             {/* Thoughts section */}
             <div class="border-t border-[var(--border-color)] pt-4">
