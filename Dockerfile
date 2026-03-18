@@ -24,5 +24,6 @@ COPY --from=app-build /app/dist ./dist
 RUN rm -rf ./dist/__tests__
 COPY --from=web-build /web/dist ./static
 COPY db/init.sql ./init.sql
+COPY db/migrations ./migrations
 
 CMD ["node", "dist/index.js"]
