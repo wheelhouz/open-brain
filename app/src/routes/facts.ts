@@ -262,13 +262,30 @@ factsRouter.post("/:factId/reject", async (c) => {
   const factId = c.req.param("factId");
   const entityId = c.req.param("entityId");
 
-  const result = await query(
-    `UPDATE entity_facts SET review_state = 'rejected', updated_at = now()
-     WHERE id = $1 AND entity_id = $2 RETURNING id`,
+  // Get the fact before rejecting so we can check for disputed counterparts
+  const factResult = await query<{ id: string; predicate: string; status: string }>(
+    `SELECT id, predicate, status FROM entity_facts WHERE id = $1 AND entity_id = $2`,
     [factId, entityId],
   );
+  if (factResult.rows.length === 0) return c.json({ error: "Fact not found" }, 404);
 
-  if (result.rows.length === 0) return c.json({ error: "Fact not found" }, 404);
+  const fact = factResult.rows[0];
+
+  await query(
+    `UPDATE entity_facts SET review_state = 'rejected', updated_at = now() WHERE id = $1`,
+    [factId],
+  );
+
+  // If rejected fact was disputed, restore the remaining disputed counterpart to active
+  if (fact.status === "disputed") {
+    await query(
+      `UPDATE entity_facts SET status = 'active', updated_at = now()
+       WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+         AND status = 'disputed' AND review_state != 'rejected'`,
+      [entityId, fact.predicate, factId],
+    );
+  }
+
   return c.json({ rejected: true });
 });
 

@@ -238,7 +238,9 @@ describe("POST /api/entities/:entityId/facts/:factId/reject", () => {
   });
 
   it("sets review_state to rejected", async () => {
-    mockQuery.mockResolvedValue({ rows: [{ id: "fact-1" }] });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "fact-1", predicate: "from", status: "tentative" }] }) // lookup
+      .mockResolvedValueOnce({ rows: [] }); // reject update
 
     const res = await app.request("/api/entities/e1/facts/fact-1/reject", {
       method: "POST",
@@ -247,6 +249,22 @@ describe("POST /api/entities/:entityId/facts/:factId/reject", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.rejected).toBe(true);
+  });
+
+  it("restores disputed counterpart to active when rejecting disputed fact", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "fact-1", predicate: "lives_in", status: "disputed" }] }) // lookup
+      .mockResolvedValueOnce({ rows: [] }) // reject update
+      .mockResolvedValueOnce({ rows: [] }); // restore counterpart
+
+    const res = await app.request("/api/entities/e1/facts/fact-1/reject", {
+      method: "POST",
+      headers: AUTH,
+    });
+    expect(res.status).toBe(200);
+    // Should restore the counterpart to active
+    expect(mockQuery.mock.calls[2][0]).toContain("status = 'active'");
+    expect(mockQuery.mock.calls[2][0]).toContain("status = 'disputed'");
   });
 });
 
