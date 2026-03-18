@@ -492,7 +492,7 @@ git add app/src/config.ts
 git commit -m "feat: add FACT_CONFIDENCE_THRESHOLD config"
 ```
 
-### Task 4: Implement fact insertion contract and processFactCandidates
+### Task 4: Implement fact insertion contract and processFactCandidates [DONE]
 
 **Files:**
 - Create: `app/src/facts.ts`
@@ -879,7 +879,7 @@ git commit -m "feat: implement fact insertion contract with conflict detection"
 
 ## Phase 4: Extraction Pipeline Integration
 
-### Task 5: Extend metadata extraction to include fact_candidates
+### Task 5: Extend metadata extraction to include fact_candidates [DONE]
 
 **Files:**
 - Modify: `app/src/openrouter.ts:37-71, 317-346`
@@ -970,7 +970,7 @@ git add app/src/openrouter.ts app/src/__tests__/openrouter.test.ts
 git commit -m "feat: extend metadata extraction prompt to include fact_candidates"
 ```
 
-### Task 6: Wire processFactCandidates into pipeline
+### Task 6: Wire processFactCandidates into pipeline [DONE]
 
 **Files:**
 - Modify: `app/src/pipeline.ts:109-116`

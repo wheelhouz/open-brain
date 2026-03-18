@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { query } from "./db.js";
 import { generateEmbedding, extractMetadata, assignCategory, type ThoughtMetadata } from "./openrouter.js";
 import { resolveEntityMentions, type MentionResolution } from "./entities.js";
+import { processFactCandidates } from "./facts.js";
 import pgvector from "pgvector";
 
 export async function createLoopsFromActionItems(
@@ -113,6 +114,15 @@ export async function capturePipeline(
       mentionMap = await resolveEntityMentions(metadata.people, thoughtId);
     } catch {
       // Don't fail capture if entity resolution fails
+    }
+  }
+
+  // Process fact candidates (best-effort, don't fail capture)
+  if (metadata.fact_candidates && metadata.fact_candidates.length > 0 && mentionMap.length > 0) {
+    try {
+      await processFactCandidates(metadata.fact_candidates, thoughtId, mentionMap);
+    } catch {
+      // Don't fail capture if fact processing fails
     }
   }
 
