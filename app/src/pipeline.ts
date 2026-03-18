@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { query } from "./db.js";
 import { generateEmbedding, extractMetadata, assignCategory, type ThoughtMetadata } from "./openrouter.js";
-import { resolveEntityMentions } from "./entities.js";
+import { resolveEntityMentions, type MentionResolution } from "./entities.js";
+import { processFactCandidates } from "./facts.js";
 import pgvector from "pgvector";
 
 export async function createLoopsFromActionItems(
@@ -107,11 +108,22 @@ export async function capturePipeline(
   }
 
   // Resolve entity mentions from people (best-effort)
+  let mentionMap: MentionResolution[] = [];
   if (metadata.people.length > 0) {
     try {
-      await resolveEntityMentions(metadata.people, thoughtId);
+      mentionMap = await resolveEntityMentions(metadata.people, thoughtId);
     } catch {
       // Don't fail capture if entity resolution fails
+    }
+  }
+
+  // Process fact candidates (best-effort, don't fail capture)
+  const factCandidates = "fact_candidates" in metadata ? metadata.fact_candidates : undefined;
+  if (factCandidates && factCandidates.length > 0 && mentionMap.length > 0) {
+    try {
+      await processFactCandidates(factCandidates, thoughtId, mentionMap);
+    } catch {
+      // Don't fail capture if fact processing fails
     }
   }
 

@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
+import { factsRouter } from "./facts.js";
+import { normalizePredicate } from "../facts.js";
 
 export const entitiesRouter = new Hono();
 
@@ -27,18 +29,20 @@ entitiesRouter.get("/", async (c) => {
     aliases: string[];
     attributes: unknown;
     mention_count: string;
+    fact_count: string;
     last_seen: string | null;
     created_at: string;
   }>(
     `SELECT e.*,
-            count(em.thought_id) as mention_count,
+            count(DISTINCT em.thought_id) as mention_count,
+            (SELECT count(*) FROM entity_facts ef WHERE ef.entity_id = e.id AND ef.review_state != 'rejected') as fact_count,
             max(t.created_at) as last_seen
      FROM entities e
      LEFT JOIN entity_mentions em ON em.entity_id = e.id
      LEFT JOIN thoughts t ON t.id = em.thought_id AND t.deleted_at IS NULL
      ${where}
      GROUP BY e.id
-     ORDER BY count(em.thought_id) DESC
+     ORDER BY count(DISTINCT em.thought_id) DESC
      LIMIT $${idx}`,
     params,
   );
@@ -47,6 +51,7 @@ entitiesRouter.get("/", async (c) => {
     entities: result.rows.map((r) => ({
       ...r,
       mention_count: parseInt(r.mention_count, 10),
+      fact_count: parseInt(r.fact_count, 10),
     })),
   });
 });
@@ -215,6 +220,61 @@ entitiesRouter.post("/merge", async (c) => {
     [body.target_id, body.source_id],
   );
 
+  // Unify facts from source into target
+  const STATUS_PRECEDENCE: Record<string, number> = {
+    active: 0,
+    tentative: 1,
+    disputed: 2,
+    superseded: 3,
+  };
+
+  const [sourceFacts, targetFacts] = await Promise.all([
+    query<{ id: string; predicate: string; object_display_text: string; status: string }>(
+      `SELECT id, predicate, object_display_text, status FROM entity_facts WHERE entity_id = $1 AND review_state != 'rejected'`,
+      [body.source_id],
+    ),
+    query<{ id: string; predicate: string; object_display_text: string; status: string }>(
+      `SELECT id, predicate, object_display_text, status FROM entity_facts WHERE entity_id = $1 AND review_state != 'rejected'`,
+      [body.target_id],
+    ),
+  ]);
+
+  for (const sourceFact of sourceFacts.rows) {
+    const targetMatch = targetFacts.rows.find(
+      (tf) =>
+        normalizePredicate(tf.predicate) === normalizePredicate(sourceFact.predicate) &&
+        tf.object_display_text.trim().toLowerCase() === sourceFact.object_display_text.trim().toLowerCase(),
+    );
+
+    if (targetMatch) {
+      // Same-meaning: merge evidence onto target fact, keep stronger status
+      await query(
+        `UPDATE entity_fact_evidence SET fact_id = $1 WHERE fact_id = $2`,
+        [targetMatch.id, sourceFact.id],
+      );
+
+      const keepStatus = (STATUS_PRECEDENCE[targetMatch.status] ?? 3) <= (STATUS_PRECEDENCE[sourceFact.status] ?? 3)
+        ? targetMatch.status
+        : sourceFact.status;
+
+      if (keepStatus !== targetMatch.status) {
+        await query(
+          `UPDATE entity_facts SET status = $1, updated_at = now() WHERE id = $2`,
+          [keepStatus, targetMatch.id],
+        );
+      }
+
+      // Delete the source fact (evidence already moved)
+      await query(`DELETE FROM entity_facts WHERE id = $1`, [sourceFact.id]);
+    } else {
+      // Different fact: move to target entity
+      await query(
+        `UPDATE entity_facts SET entity_id = $1, updated_at = now() WHERE id = $2`,
+        [body.target_id, sourceFact.id],
+      );
+    }
+  }
+
   // Update target aliases
   await query(
     `UPDATE entities SET aliases = $1, updated_at = now() WHERE id = $2`,
@@ -288,3 +348,5 @@ entitiesRouter.get("/:id/thoughts", async (c) => {
     next_cursor: hasMore ? thoughts[thoughts.length - 1].created_at : null,
   });
 });
+
+entitiesRouter.route("/:entityId/facts", factsRouter);

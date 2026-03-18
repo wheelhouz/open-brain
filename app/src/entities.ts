@@ -1,6 +1,24 @@
 import { query } from "./db.js";
 import { config } from "./config.js";
 
+export type ResolutionState =
+  | "auto_linked_exact"
+  | "auto_linked_alias"
+  | "auto_linked_fuzzy"
+  | "new_entity_created"
+  | "pending_review"
+  | "merged_after_review"
+  | "rejected";
+
+export interface MentionResolution {
+  raw_mention_text: string;
+  normalized_mention_text: string;
+  entity_id: string;
+  resolution_state: ResolutionState;
+  resolution_confidence: number;
+  resolution_metadata: Record<string, unknown> | null;
+}
+
 /**
  * Resolve person names to canonical entity records.
  * Pure SQL — no LLM calls.
@@ -10,80 +28,117 @@ import { config } from "./config.js";
  * 2. Alias match via ILIKE ANY(aliases)
  * 3. Fuzzy match via pg_trgm similarity (auto-adds alias on hit)
  * 4. No match → create new entity with name as sole alias
- * 5. Upsert entity_mentions row
+ * 5. Upsert entity_mentions row with enrichment columns
  */
 export async function resolveEntityMentions(
   names: string[],
   thoughtId: string,
-): Promise<void> {
+): Promise<MentionResolution[]> {
+  const results: MentionResolution[] = [];
+
   for (const name of names) {
     const trimmed = name.trim();
     if (!trimmed) continue;
+    const normalized = trimmed.toLowerCase();
 
     let entityId: string | null = null;
+    let resolutionState: ResolutionState = "new_entity_created";
+    let confidence = 1.0;
+    let metadata: Record<string, unknown> | null = null;
 
     // 1. Exact match on canonical_name
     const exact = await query<{ id: string }>(
-      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person'`,
+      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
       [trimmed],
     );
 
     if (exact.rows.length > 0) {
       entityId = exact.rows[0].id;
-    } else {
-      // 2. Alias match
-      const aliasMatch = await query<{ id: string }>(
+      resolutionState = "auto_linked_exact";
+      confidence = 1.0;
+      metadata = { match_type: "canonical" };
+    }
+
+    // 2. Alias match
+    if (!entityId) {
+      const alias = await query<{ id: string }>(
         `SELECT id FROM entities WHERE $1 ILIKE ANY(aliases) AND entity_type = 'person' LIMIT 1`,
         [trimmed],
       );
-
-      if (aliasMatch.rows.length > 0) {
-        entityId = aliasMatch.rows[0].id;
-      } else {
-        // 3. Fuzzy match via pg_trgm
-        const fuzzy = await query<{ id: string; sim: number }>(
-          `SELECT id,
-                  greatest(
-                    similarity(lower(canonical_name), lower($1)),
-                    coalesce((SELECT max(similarity(lower(a), lower($1))) FROM unnest(aliases) a), 0)
-                  ) AS sim
-           FROM entities
-           WHERE entity_type = 'person'
-             AND (
-               lower(canonical_name) % lower($1)
-               OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) % lower($1))
-             )
-           ORDER BY sim DESC
-           LIMIT 1`,
-          [trimmed],
-        );
-
-        if (fuzzy.rows.length > 0 && fuzzy.rows[0].sim >= config.entityFuzzyThreshold) {
-          entityId = fuzzy.rows[0].id;
-          // Auto-add as alias for future exact lookups
-          await query(
-            `UPDATE entities SET aliases = array_append(aliases, $1), updated_at = now()
-             WHERE id = $2 AND NOT ($1 = ANY(aliases))`,
-            [trimmed, entityId],
-          );
-        } else {
-          // 4. Create new entity
-          const created = await query<{ id: string }>(
-            `INSERT INTO entities (canonical_name, entity_type, aliases)
-             VALUES ($1, 'person', ARRAY[$1])
-             ON CONFLICT (lower(canonical_name), entity_type) DO UPDATE SET updated_at = now()
-             RETURNING id`,
-            [trimmed],
-          );
-          entityId = created.rows[0].id;
-        }
+      if (alias.rows.length > 0) {
+        entityId = alias.rows[0].id;
+        resolutionState = "auto_linked_alias";
+        confidence = 1.0;
+        metadata = { match_type: "alias", matched_alias: trimmed };
       }
     }
 
-    // 5. Upsert entity_mentions
+    // 3. Fuzzy match via pg_trgm
+    if (!entityId) {
+      const fuzzy = await query<{ id: string; sim: number }>(
+        `SELECT id,
+                greatest(
+                  similarity(lower(canonical_name), lower($1)),
+                  coalesce((SELECT max(similarity(lower(a), lower($1))) FROM unnest(aliases) a), 0)
+                ) AS sim
+         FROM entities
+         WHERE entity_type = 'person'
+           AND (
+             lower(canonical_name) % lower($1)
+             OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) % lower($1))
+           )
+         ORDER BY sim DESC
+         LIMIT 1`,
+        [trimmed],
+      );
+
+      if (fuzzy.rows.length > 0 && fuzzy.rows[0].sim >= config.entityFuzzyThreshold) {
+        entityId = fuzzy.rows[0].id;
+        resolutionState = "auto_linked_fuzzy";
+        confidence = fuzzy.rows[0].sim;
+        metadata = { match_type: "fuzzy", similarity: fuzzy.rows[0].sim };
+
+        // Auto-add as alias for future exact lookups
+        await query(
+          `UPDATE entities SET aliases = array_append(aliases, $1), updated_at = now()
+           WHERE id = $2 AND NOT ($1 = ANY(aliases))`,
+          [trimmed, entityId],
+        );
+      }
+    }
+
+    // 4. Create new entity
+    if (!entityId) {
+      const created = await query<{ id: string }>(
+        `INSERT INTO entities (canonical_name, entity_type, aliases)
+         VALUES ($1, 'person', ARRAY[$1])
+         ON CONFLICT (lower(canonical_name), entity_type) DO UPDATE SET updated_at = now()
+         RETURNING id`,
+        [trimmed],
+      );
+      entityId = created.rows[0].id;
+      resolutionState = "new_entity_created";
+      confidence = 1.0;
+      metadata = null;
+    }
+
+    // 5. Upsert entity_mentions with enrichment columns
     await query(
-      `INSERT INTO entity_mentions (entity_id, thought_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [entityId, thoughtId],
+      `INSERT INTO entity_mentions (entity_id, thought_id, raw_mention_text, normalized_mention_text, resolution_state, resolution_confidence, resolution_metadata_json)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (entity_id, thought_id) DO NOTHING`,
+      [entityId, thoughtId, trimmed, normalized, resolutionState, confidence, metadata ? JSON.stringify(metadata) : null],
     );
+
+    results.push({
+      raw_mention_text: trimmed,
+      normalized_mention_text: normalized,
+      entity_id: entityId,
+      resolution_state: resolutionState,
+      resolution_confidence: confidence,
+      resolution_metadata: metadata,
+    });
   }
+
+  return results;
 }

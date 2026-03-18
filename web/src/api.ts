@@ -84,8 +84,43 @@ export interface Entity {
   aliases: string[];
   attributes: Record<string, unknown>;
   mention_count: number;
+  fact_count: number;
   last_seen: string | null;
   created_at: string;
+}
+
+export interface EntityFact {
+  id: string;
+  entity_id: string;
+  predicate: string;
+  object_value_json: unknown;
+  object_display_text: string;
+  status: "active" | "tentative" | "disputed" | "superseded";
+  review_state: "pending" | "accepted" | "rejected";
+  confidence: number | null;
+  source_kind: string;
+  valid_at_start: string | null;
+  valid_at_end: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FactEvidence {
+  id: string;
+  fact_id: string;
+  thought_id: string | null;
+  excerpt: string | null;
+  evidence_type: string;
+  created_at: string;
+  thought_content?: string;
+}
+
+export interface FactWithEvidence extends EntityFact {
+  evidence: FactEvidence[];
+}
+
+export interface PendingFact extends EntityFact {
+  entity_name: string;
 }
 
 export interface MergeCluster {
@@ -338,6 +373,90 @@ export const api = {
     );
   },
 
+  entityFacts: (entityId: string, filters?: { status?: string; review_state?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.review_state) params.set("review_state", filters.review_state);
+    const qs = params.toString();
+    return request<{ facts: EntityFact[] }>(`/api/entities/${entityId}/facts${qs ? `?${qs}` : ""}`);
+  },
+
+  entityFactDetail: (entityId: string, factId: string) =>
+    request<{ fact: EntityFact; evidence: FactEvidence[] }>(`/api/entities/${entityId}/facts/${factId}`),
+
+  createFact: async (entityId: string, data: { predicate: string; value: string; display_text?: string; valid_at_start?: string; valid_at_end?: string }) => {
+    const key = getKey();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+
+    const res = await fetch(`/api/entities/${entityId}/facts`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(data),
+    });
+    if (res.status === 401) throw new Error("Unauthorized");
+    if (res.status === 409) {
+      const body = await res.json();
+      const err = new Error("Conflict") as Error & { conflict: typeof body };
+      err.conflict = body;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.json();
+  },
+
+  acceptFact: async (entityId: string, factId: string) => {
+    const key = getKey();
+    const headers: Record<string, string> = {};
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+
+    const res = await fetch(`/api/entities/${entityId}/facts/${factId}/accept`, {
+      method: "POST",
+      headers,
+    });
+    if (res.status === 401) throw new Error("Unauthorized");
+    if (res.status === 409) {
+      const body = await res.json();
+      const err = new Error("Conflict") as Error & { conflict: typeof body };
+      err.conflict = body;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.json();
+  },
+
+  rejectFact: (entityId: string, factId: string) =>
+    request<{ rejected: boolean }>(`/api/entities/${entityId}/facts/${factId}/reject`, {
+      method: "POST",
+    }),
+
+  updateFact: (entityId: string, factId: string, data: { predicate?: string; object_display_text?: string; valid_at_start?: string | null; valid_at_end?: string | null }) =>
+    request<{ fact: EntityFact }>(`/api/entities/${entityId}/facts/${factId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+
+  deleteFact: (entityId: string, factId: string) =>
+    request<{ deleted: boolean }>(`/api/entities/${entityId}/facts/${factId}`, {
+      method: "DELETE",
+    }),
+
+  resolveConflict: (entityId: string, factId: string, action: string, note?: string) =>
+    request<{ resolved: boolean; action: string }>(`/api/entities/${entityId}/facts/${factId}/resolve-conflict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, note }),
+    }),
+
+  pendingFacts: (cursor?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (cursor) params.set("cursor", cursor);
+    if (limit) params.set("limit", String(limit));
+    const qs = params.toString();
+    return request<{ facts: PendingFact[]; next_cursor: string | null }>(`/api/facts/pending${qs ? `?${qs}` : ""}`);
+  },
+
   renamePerson: (oldName: string, newName: string) =>
     request<{ renamed: boolean; from: string; to: string; affected: number }>(
       `/api/people/${encodeURIComponent(oldName)}`,
@@ -352,6 +471,7 @@ export const api = {
     messages: ChatMessage[],
     onChunk: (text: string) => void,
     onSources: (thoughts: SourceThought[]) => void,
+    entityId?: string,
   ) => {
     const key = getKey();
     const headers: Record<string, string> = {
@@ -359,10 +479,13 @@ export const api = {
     };
     if (key) headers["Authorization"] = `Bearer ${key}`;
 
+    const chatBody: Record<string, unknown> = { messages };
+    if (entityId) chatBody.entity_id = entityId;
+
     const res = await fetch("/api/chat", {
       method: "POST",
       headers,
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify(chatBody),
     });
 
     if (res.status === 401) throw new Error("Unauthorized");

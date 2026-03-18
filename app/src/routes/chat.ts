@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { chatCompletionStream } from "../openrouter.js";
 import type { ChatMessage } from "../openrouter.js";
 import { retrieveContext, formatContext } from "../rag.js";
+import { query } from "../db.js";
+import { buildEntityGroundingContext, formatEntityGroundingPrompt } from "../entity-chat.js";
 
 export const chatRouter = new Hono();
 
@@ -16,9 +18,21 @@ Guidelines:
 - Be concise but thorough
 - Use markdown formatting for readability`;
 
+const ENTITY_SYSTEM_PROMPT = `You are answering a question about a specific entity from the user's personal knowledge base "Open Brain". Use only the provided facts, evidence, and thoughts. Apply these rules:
+
+- Active facts: state directly ("Maya is from Porto")
+- Tentative facts: hedge ("Maya may have been born on May 12, 1991")
+- Disputed facts: present as unresolved conflict ("Maya's current city is unclear — one note supports Seattle, a newer note suggests Portland")
+- Superseded facts: frame as past ("Maya previously lived in Seattle")
+- Thoughts without a corresponding fact: frame as unconfirmed ("A recent note suggests she may be considering a move, but this has not been confirmed")
+- If no fact or thought exists for what the user asked about: say so directly. Do not speculate.
+
+Use markdown formatting for readability.`;
+
 chatRouter.post("/", async (c) => {
   const body = await c.req.json<{
     messages?: Array<{ role: "user" | "assistant"; content: string }>;
+    entity_id?: string;
   }>();
 
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
@@ -30,18 +44,37 @@ chatRouter.post("/", async (c) => {
     return c.json({ error: "at least one user message is required" }, 400);
   }
 
-  // RAG: rewrite query from conversation context, retrieve and rerank
-  const ragContext = await retrieveContext(body.messages);
+  let systemPrompt: string;
+  let sources: Array<{ id: string; content: string; similarity: number }>;
 
-  const sources = ragContext.thoughts.map((t) => ({
-    id: t.id,
-    content: t.content.slice(0, 200),
-    similarity: t.similarity,
-  }));
+  if (body.entity_id) {
+    // Entity-grounded path
+    const entityCheck = await query(`SELECT id FROM entities WHERE id = $1`, [body.entity_id]);
+    if (entityCheck.rows.length === 0) {
+      return c.json({ error: "Entity not found" }, 404);
+    }
 
-  // Build messages for the LLM
-  const contextBlock = formatContext(ragContext.thoughts);
-  const systemPrompt = `${SYSTEM_PROMPT}\n\n--- Retrieved Thoughts ---\n${contextBlock}\n--- End of Retrieved Thoughts ---`;
+    const groundingContext = await buildEntityGroundingContext(body.entity_id, lastUserMsg.content);
+    const contextBlock = formatEntityGroundingPrompt(groundingContext);
+    systemPrompt = `${ENTITY_SYSTEM_PROMPT}\n\n${contextBlock}`;
+
+    sources = groundingContext.thoughts.map((t) => ({
+      id: t.id,
+      content: t.content.slice(0, 200),
+      similarity: t.similarity,
+    }));
+  } else {
+    // Existing generic RAG path
+    const ragContext = await retrieveContext(body.messages);
+    const contextBlock = formatContext(ragContext.thoughts);
+    systemPrompt = `${SYSTEM_PROMPT}\n\n--- Retrieved Thoughts ---\n${contextBlock}\n--- End of Retrieved Thoughts ---`;
+
+    sources = ragContext.thoughts.map((t) => ({
+      id: t.id,
+      content: t.content.slice(0, 200),
+      similarity: t.similarity,
+    }));
+  }
 
   const llmMessages: ChatMessage[] = [
     { role: "system", content: systemPrompt },

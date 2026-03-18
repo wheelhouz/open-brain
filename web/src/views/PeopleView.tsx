@@ -11,10 +11,14 @@ function EntityCard({
   entity,
   selected,
   onClick,
+  pendingCount,
+  factCount,
 }: {
   entity: Entity;
   selected?: boolean;
   onClick: () => void;
+  pendingCount?: number;
+  factCount?: number;
 }) {
   return (
     <div
@@ -32,9 +36,16 @@ function EntityCard({
         <User class="w-5 h-5 text-[var(--type-person-note)]" />
       </div>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium text-[var(--text-primary)] truncate">
-          {entity.canonical_name}
-        </p>
+        <div class="flex items-center gap-1.5">
+          <p class="text-sm font-medium text-[var(--text-primary)] truncate">
+            {entity.canonical_name}
+          </p>
+          {pendingCount != null && pendingCount > 0 && (
+            <span class="bg-amber-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center flex-shrink-0">
+              {pendingCount}
+            </span>
+          )}
+        </div>
         {entity.aliases.length > 1 && (
           <p class="text-xs text-[var(--text-muted)] truncate">
             aka {entity.aliases.filter((a) => a !== entity.canonical_name).join(", ")}
@@ -42,6 +53,7 @@ function EntityCard({
         )}
         <p class="text-xs text-[var(--text-muted)]">
           {entity.mention_count} thought{entity.mention_count !== 1 ? "s" : ""}
+          {factCount != null && factCount > 0 && <> &middot; {factCount} fact{factCount !== 1 ? "s" : ""}</>}
           {entity.last_seen && <> &middot; {relativeTime(entity.last_seen)}</>}
         </p>
       </div>
@@ -55,6 +67,7 @@ export function PeopleView(_props: RoutableProps) {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [pendingCounts, setPendingCounts] = useState<Map<string, number>>(new Map());
 
   const loadEntities = useCallback(() => {
     api
@@ -81,6 +94,18 @@ export function PeopleView(_props: RoutableProps) {
   }, []);
 
   useEffect(loadEntities, [loadEntities]);
+
+  // Fetch pending fact counts
+  useEffect(() => {
+    if (entities.length === 0) return;
+    api.pendingFacts(undefined, 50).then((r) => {
+      const counts = new Map<string, number>();
+      for (const f of r.facts) {
+        counts.set(f.entity_id, (counts.get(f.entity_id) || 0) + 1);
+      }
+      setPendingCounts(counts);
+    }).catch(() => {});
+  }, [entities]);
 
   // Auto-select entity from ?selected= query param (matches by name/alias)
   const applySelectedParam = useCallback(() => {
@@ -131,6 +156,8 @@ export function PeopleView(_props: RoutableProps) {
               entity={entity}
               selected={selectedId === entity.id}
               onClick={() => setSelectedId(selectedId === entity.id ? "" : entity.id)}
+              pendingCount={pendingCounts.get(entity.id)}
+              factCount={entity.fact_count}
             />
           ))}
         </div>

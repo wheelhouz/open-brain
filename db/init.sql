@@ -125,13 +125,67 @@ CREATE INDEX IF NOT EXISTS idx_entities_canonical_name_trgm
 
 -- Entity Mentions (links entities to thoughts)
 CREATE TABLE IF NOT EXISTS entity_mentions (
-    entity_id  UUID REFERENCES entities(id) ON DELETE CASCADE,
-    thought_id UUID REFERENCES thoughts(id),
-    role       TEXT NOT NULL DEFAULT 'mentioned'
+    entity_id               UUID        REFERENCES entities(id) ON DELETE CASCADE,
+    thought_id              UUID        REFERENCES thoughts(id),
+    role                    TEXT        NOT NULL DEFAULT 'mentioned'
         CHECK (role IN ('subject', 'mentioned', 'author')),
-    created_at TIMESTAMPTZ DEFAULT now(),
+    raw_mention_text        TEXT,
+    normalized_mention_text TEXT,
+    resolution_state        TEXT        DEFAULT 'auto_linked_exact'
+        CHECK (resolution_state IN (
+            'auto_linked_exact', 'auto_linked_alias', 'auto_linked_fuzzy',
+            'new_entity_created', 'pending_review', 'merged_after_review', 'rejected'
+        )),
+    resolution_confidence   REAL,
+    resolution_metadata_json JSONB,
+    created_at              TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (entity_id, thought_id)
 );
+
+-- entity_facts: memory claims about entities
+CREATE TABLE IF NOT EXISTS entity_facts (
+    id                  UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    entity_id           UUID        NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    predicate           TEXT        NOT NULL,
+    object_value_json   JSONB,
+    object_display_text TEXT        NOT NULL,
+    status              TEXT        NOT NULL DEFAULT 'tentative'
+        CHECK (status IN ('active', 'tentative', 'disputed', 'superseded')),
+    review_state        TEXT        NOT NULL DEFAULT 'pending'
+        CHECK (review_state IN ('pending', 'accepted', 'rejected')),
+    confidence          REAL,
+    source_kind         TEXT        NOT NULL DEFAULT 'extracted'
+        CHECK (source_kind IN ('extracted', 'manual', 'chat', 'agent')),
+    valid_at_start      TIMESTAMPTZ,
+    valid_at_end        TIMESTAMPTZ,
+    embedding           vector(1536),
+    created_at          TIMESTAMPTZ DEFAULT now(),
+    updated_at          TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_facts_entity_predicate
+    ON entity_facts (entity_id, predicate);
+CREATE INDEX IF NOT EXISTS idx_entity_facts_review_state
+    ON entity_facts (review_state);
+CREATE INDEX IF NOT EXISTS idx_entity_facts_entity_id
+    ON entity_facts (entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_facts_embedding
+    ON entity_facts USING hnsw (embedding vector_cosine_ops);
+
+-- entity_fact_evidence: links facts to supporting thoughts/sources
+CREATE TABLE IF NOT EXISTS entity_fact_evidence (
+    id              UUID        DEFAULT gen_random_uuid() PRIMARY KEY,
+    fact_id         UUID        NOT NULL REFERENCES entity_facts(id) ON DELETE CASCADE,
+    thought_id      UUID        REFERENCES thoughts(id) ON DELETE CASCADE,
+    excerpt         TEXT,
+    evidence_type   TEXT        NOT NULL DEFAULT 'extraction'
+        CHECK (evidence_type IN ('extraction', 'manual', 'conversation')),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (fact_id, thought_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_fact_evidence_fact_id
+    ON entity_fact_evidence (fact_id);
 
 -- Phase 2 enrichment: link open loops to blocking entities
 ALTER TABLE open_loops ADD COLUMN IF NOT EXISTS blocked_by_entity_id UUID REFERENCES entities(id);
