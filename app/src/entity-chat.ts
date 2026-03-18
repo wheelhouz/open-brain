@@ -110,7 +110,7 @@ export async function buildEntityGroundingContext(
   }));
 
   // 4. Recent entity-filtered thoughts
-  const thoughtResult = await query(
+  const thoughtResult = await query<GroundingThought>(
     `SELECT t.id, t.content, t.created_at,
             1 - (t.embedding <=> $1) as similarity
      FROM thoughts t
