@@ -8,10 +8,12 @@ A self-hosted personal knowledge base that captures your thoughts and makes them
 
 - **Semantic search** -- find thoughts by meaning, not just keywords
 - **Auto-extracted metadata** -- topics, people, sentiment, and type detected automatically by LLM
+- **Entity facts** -- structured memory about people (e.g. "works at Anthropic", "from Estonia") with conflict detection, review workflow, and evidence linking
+- **Open loops** -- action items, questions, and decisions extracted from thoughts with snooze/close lifecycle
 - **Thought threads** -- link related thoughts into chains
-- **RAG chat** -- ask questions across your entire knowledge base
-- **MCP server** -- capture and search from Claude, Claude Code, or any MCP client
-- **Web UI** -- stream, search, browse topics/people, stats dashboard
+- **RAG chat** -- ask questions across your entire knowledge base, with entity-grounded chat for person-specific conversations
+- **MCP server** -- capture, search, manage facts, and review loops from Claude, Claude Code, or any MCP client
+- **Web UI** -- stream, search, browse topics/people, review pending facts, stats dashboard
 - **Self-hosted** -- your data stays on your hardware
 
 ## Quick Start
@@ -118,7 +120,9 @@ Add to your Claude Code MCP config:
 - **Database**: PostgreSQL 16 + pgvector
 - **AI**: OpenRouter (embeddings + metadata extraction + chat)
 
-When a thought is captured, the system runs embedding generation and LLM metadata extraction in parallel, then stores the thought with its vector and extracted topics/people/sentiment in PostgreSQL. Search uses pgvector's cosine similarity to find semantically related thoughts. Chat uses RAG -- embedding the query, retrieving relevant thoughts, and streaming an LLM response grounded in your knowledge base.
+When a thought is captured, the system runs embedding generation and LLM metadata extraction in parallel, then stores the thought with its vector and extracted topics/people/sentiment in PostgreSQL. The pipeline also resolves person mentions to canonical entities (with fuzzy matching and alias support) and extracts structured fact candidates about those people. Facts go through a lifecycle: tentative claims are surfaced for review, conflicts with existing facts are flagged, and accepted facts build up a structured memory profile for each person.
+
+Search uses pgvector's cosine similarity to find semantically related thoughts. Chat uses RAG -- embedding the query, retrieving relevant thoughts, and streaming an LLM response grounded in your knowledge base. Entity-specific chat enriches the context with the person's facts and evidence before querying.
 
 ## Acknowledgments
 
