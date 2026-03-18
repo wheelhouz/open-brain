@@ -59,10 +59,21 @@ export function ChatView(_props: RoutableProps) {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [savedIndices, setSavedIndices] = useState<Set<number>>(new Set());
+  const [entityId] = useState<string | undefined>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("entity_id") || undefined;
+  });
+  const [entityName, setEntityName] = useState<string | undefined>();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const shouldAutoScroll = useRef(true);
   const autoSentRef = useRef(false);
+
+  // Load entity name for display
+  useEffect(() => {
+    if (!entityId) return;
+    api.entity(entityId).then((e) => setEntityName(e.canonical_name)).catch(() => {});
+  }, [entityId]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -128,6 +139,7 @@ export function ChatView(_props: RoutableProps) {
             return updated;
           });
         },
+        entityId,
       );
     } catch {
       setEntries((prev) => {
@@ -194,9 +206,13 @@ export function ChatView(_props: RoutableProps) {
             <div class="chat-welcome-icon">
               <Brain class="w-7 h-7" />
             </div>
-            <h2 class="chat-welcome-title">Chat with your brain</h2>
+            <h2 class="chat-welcome-title">
+              {entityName ? `Chat about ${entityName}` : "Chat with your brain"}
+            </h2>
             <p class="chat-welcome-hint">
-              Ask questions about your stored thoughts
+              {entityName
+                ? `Ask questions about ${entityName} — answers are grounded in facts and evidence`
+                : "Ask questions about your stored thoughts"}
             </p>
             <div class="chat-suggestions">
               {SUGGESTIONS.map((s) => (
