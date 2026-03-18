@@ -310,8 +310,10 @@ describe("POST /api/entities/:entityId/facts/:factId/resolve-conflict", () => {
     expect(mockQuery.mock.calls[3][0]).toContain("rejected");
   });
 
-  it("keep_both_disputed: no state change", async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ id: "new-fact", predicate: "from", entity_id: "e1" }] });
+  it("keep_both_disputed: accepts new fact but keeps both disputed", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: "new-fact", predicate: "from", entity_id: "e1" }] })
+      .mockResolvedValueOnce({ rows: [] }); // accept pending fact
 
     const res = await app.request("/api/entities/e1/facts/new-fact/resolve-conflict", {
       method: "POST",
@@ -319,8 +321,9 @@ describe("POST /api/entities/:entityId/facts/:factId/resolve-conflict", () => {
       body: JSON.stringify({ action: "keep_both_disputed" }),
     });
     expect(res.status).toBe(200);
-    // Only 1 query — fact lookup, no updates
-    expect(mockQuery).toHaveBeenCalledTimes(1);
+    // 2 queries: fact lookup + accept pending
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(mockQuery.mock.calls[1][0]).toContain("review_state = 'accepted'");
   });
 });
 

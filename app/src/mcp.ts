@@ -678,6 +678,10 @@ export function createMcpServer(): McpServer {
       const f = newFact.rows[0];
 
       if (action === "keep_both_disputed") {
+        await query(
+          `UPDATE entity_facts SET review_state = 'accepted', updated_at = now() WHERE id = $1 AND review_state = 'pending'`,
+          [fact_id],
+        );
         return { content: [{ type: "text" as const, text: `Kept both facts as disputed for "${f.canonical_name} — ${f.predicate}"` }] };
       }
 

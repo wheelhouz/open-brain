@@ -292,6 +292,11 @@ factsRouter.post("/:factId/resolve-conflict", async (c) => {
   if (newFact.rows.length === 0) return c.json({ error: "Fact not found" }, 404);
 
   if (body.action === "keep_both_disputed") {
+    // Accept the new fact (move out of pending) but keep both as disputed
+    await query(
+      `UPDATE entity_facts SET review_state = 'accepted', updated_at = now() WHERE id = $1 AND review_state = 'pending'`,
+      [factId],
+    );
     return c.json({ resolved: true, action: body.action });
   }
 

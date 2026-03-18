@@ -304,11 +304,12 @@ describe("MCP fact tools", () => {
     expect(body.result.content[0].text).toContain("superseded");
   });
 
-  it("resolve_fact_conflict keeps both disputed", async () => {
+  it("resolve_fact_conflict keeps both disputed and accepts pending", async () => {
     const sessionId = await mcpInit();
     mockQuery.mockReset();
     mockQuery
-      .mockResolvedValueOnce({ rows: [{ id: "f1", entity_id: "e1", predicate: "from", object_display_text: "Porto", canonical_name: "Maya" }] });
+      .mockResolvedValueOnce({ rows: [{ id: "f1", entity_id: "e1", predicate: "from", object_display_text: "Porto", canonical_name: "Maya" }] })
+      .mockResolvedValueOnce({ rows: [] }); // accept pending
 
     const res = await mcpCall(sessionId, "tools/call", {
       name: "resolve_fact_conflict",
@@ -317,5 +318,7 @@ describe("MCP fact tools", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.result.content[0].text).toContain("disputed");
+    // Should accept the pending fact
+    expect(mockQuery.mock.calls[1][0]).toContain("review_state = 'accepted'");
   });
 });
