@@ -160,7 +160,7 @@ export function createMcpServer(): McpServer {
   // capture_thought
   server.tool(
     "capture_thought",
-    "Capture a new thought. Generates embedding and extracts metadata automatically.",
+    "Capture a new thought, observation, or note. Generates embedding and extracts metadata automatically. For specific facts about a person (e.g. where they work, where they're from), use add_entity_fact instead.",
     {
       content: z.string().describe("The thought to capture"),
       parent_id: z.string().optional().describe("Parent thought ID to link as sub-thought"),
@@ -510,7 +510,7 @@ export function createMcpServer(): McpServer {
   // add_entity_fact
   server.tool(
     "add_entity_fact",
-    "Add a fact about an entity. Example: 'Maya Patel works at Anthropic'. Use source_kind='manual' for user-confirmed facts, 'agent' for AI-derived.",
+    "Record a structured fact about a person. Use this (not capture_thought) when the user states something factual about someone. Parameters: entity_name, predicate, value. Example: entity_name='Leo', predicate='works_at', value='Microsoft'. Use source_kind='manual' for user-confirmed facts, 'agent' for AI-derived.",
     {
       entity_name: z.string().describe("Entity name"),
       predicate: z.string().describe("The relationship/attribute (e.g. 'from', 'works_at', 'born_on')"),
