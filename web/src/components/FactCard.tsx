@@ -17,6 +17,7 @@ interface FactCardProps {
   onReject?: () => void;
   onResolve?: (action: string) => void;
   onEdit?: (data: { predicate?: string; object_display_text?: string }) => void;
+  onExpand?: () => void;
   onThoughtClick?: (thoughtId: string) => void;
   showActions?: boolean;
 }
@@ -28,6 +29,7 @@ export function FactCard({
   onReject,
   onResolve,
   onEdit,
+  onExpand,
   onThoughtClick,
   showActions = true,
 }: FactCardProps) {
@@ -143,16 +145,19 @@ export function FactCard({
                   </p>
                 )}
               </div>
-              {(evidence && evidence.length > 0) && (
-                <button
-                  onClick={() => setExpanded(!expanded)}
-                  class="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] cursor-pointer"
-                >
-                  {expanded
-                    ? <ChevronUp class="w-4 h-4" />
-                    : <ChevronDown class="w-4 h-4" />}
-                </button>
-              )}
+                  <button
+                onClick={() => {
+                  const willExpand = !expanded;
+                  setExpanded(willExpand);
+                  if (willExpand) onExpand?.();
+                }}
+                class="p-1 rounded hover:bg-[var(--surface-hover)] text-[var(--text-muted)] cursor-pointer"
+                title={expanded ? "Collapse" : "Show evidence"}
+              >
+                {expanded
+                  ? <ChevronUp class="w-4 h-4" />
+                  : <ChevronDown class="w-4 h-4" />}
+              </button>
             </div>
 
             {/* Action buttons */}
@@ -197,29 +202,37 @@ export function FactCard({
       </div>
 
       {/* Evidence section */}
-      {expanded && evidence && evidence.length > 0 && (
+      {expanded && (
         <div class="border-t border-[var(--border-color)] px-3 py-2 space-y-2">
-          <p class="text-xs font-medium text-[var(--text-muted)]">Evidence ({evidence.length})</p>
-          {evidence.map((e) => (
-            <div key={e.id} class="text-xs text-[var(--text-secondary)] pl-2 border-l-2 border-[var(--border-color)]">
-              {e.excerpt && <p class="italic">"{e.excerpt}"</p>}
-              <p class="text-[var(--text-muted)] mt-0.5">
-                {e.evidence_type}
-                {e.thought_id && onThoughtClick && (
-                  <>
-                    {" "}
-                    <button
-                      onClick={() => onThoughtClick(e.thought_id!)}
-                      class="text-[var(--accent)] hover:underline cursor-pointer"
-                    >
-                      View source
-                    </button>
-                  </>
-                )}
-                {" "}&middot; {relativeTime(e.created_at)}
-              </p>
-            </div>
-          ))}
+          {!evidence ? (
+            <div class="h-4 w-32 rounded bg-[var(--bg-tertiary)] animate-pulse" />
+          ) : evidence.length === 0 ? (
+            <p class="text-xs text-[var(--text-muted)]">No evidence recorded</p>
+          ) : (
+            <>
+              <p class="text-xs font-medium text-[var(--text-muted)]">Evidence ({evidence.length})</p>
+              {evidence.map((e) => (
+                <div key={e.id} class="text-xs text-[var(--text-secondary)] pl-2 border-l-2 border-[var(--border-color)]">
+                  {e.excerpt && <p class="italic">"{e.excerpt}"</p>}
+                  <p class="text-[var(--text-muted)] mt-0.5">
+                    {e.evidence_type}
+                    {e.thought_id && onThoughtClick && (
+                      <>
+                        {" "}
+                        <button
+                          onClick={() => onThoughtClick(e.thought_id!)}
+                          class="text-[var(--accent)] hover:underline cursor-pointer"
+                        >
+                          View source
+                        </button>
+                      </>
+                    )}
+                    {" "}&middot; {relativeTime(e.created_at)}
+                  </p>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -220,10 +220,8 @@ export function FactSection({ entityId, onFactChanged, onThoughtClick }: FactSec
                 evidence={evidenceMap.get(fact.id)}
                 onEdit={(data) => handleEdit(fact.id, data)}
                 onResolve={(action) => handleResolve(fact.id, action)}
-                onThoughtClick={(id) => {
-                  loadEvidence(fact.id);
-                  onThoughtClick?.(id);
-                }}
+                onExpand={() => loadEvidence(fact.id)}
+                onThoughtClick={(id) => onThoughtClick?.(id)}
                 showActions={true}
               />
             )),
