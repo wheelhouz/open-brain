@@ -2259,7 +2259,7 @@ git commit -m "feat: add entity-grounded chat with fact/evidence retrieval"
 
 ## Phase 9: Frontend — API Client & State
 
-### Task 11: Extend frontend API client
+### Task 11: Extend frontend API client [DONE]
 
 **Files:**
 - Modify: `web/src/api.ts`
