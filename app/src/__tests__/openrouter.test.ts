@@ -64,6 +64,47 @@ describe("extractMetadata", () => {
     expect(result.topics).toContain("roadmap");
   });
 
+  it("extracts fact_candidates from metadata response", async () => {
+    const metadata = {
+      type: "person_note",
+      topics: ["travel"],
+      people: ["Maya"],
+      action_items: [],
+      dates_mentioned: [],
+      source_context: null,
+      fact_candidates: [
+        { entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.95, excerpt: "Maya is from Porto" },
+        { entity: "", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "bad" }, // missing entity
+        { entity: "Maya", predicate: "", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "bad" }, // missing predicate
+      ],
+    };
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(metadata) } }],
+      }),
+    });
+
+    const result = await extractMetadata("Maya is from Porto");
+    expect(result.fact_candidates).toHaveLength(1);
+    expect(result.fact_candidates![0].entity).toBe("Maya");
+    expect(result.fact_candidates![0].predicate).toBe("from");
+    expect(result.fact_candidates![0].confidence).toBe(0.95);
+  });
+
+  it("defaults fact_candidates to empty array when not present", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ type: "observation" }) } }],
+      }),
+    });
+
+    const result = await extractMetadata("Some thought");
+    expect(result.fact_candidates).toEqual([]);
+  });
+
   it("handles malformed metadata gracefully", async () => {
     mockFetch.mockResolvedValue({
       ok: true,

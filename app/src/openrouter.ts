@@ -34,6 +34,15 @@ export interface ActionItem {
   loop_type: "task" | "question" | "decision" | "waiting_on";
 }
 
+export interface FactCandidateRaw {
+  entity: string;
+  predicate: string;
+  value: string;
+  display: string;
+  confidence: number;
+  excerpt: string;
+}
+
 export interface ThoughtMetadata {
   type: string;
   topics: string[];
@@ -41,6 +50,7 @@ export interface ThoughtMetadata {
   action_items: ActionItem[];
   dates_mentioned: string[];
   source_context: string | null;
+  fact_candidates?: FactCandidateRaw[];
 }
 
 const EXTRACTION_PROMPT = `You are a thought classifier. Given the following thought, extract structured metadata. Respond ONLY with valid JSON matching this schema:
@@ -51,7 +61,15 @@ const EXTRACTION_PROMPT = `You are a thought classifier. Given the following tho
     "people": names of individuals mentioned (empty array if none),
     "action_items": array of objects with "content" and "loop_type" (empty array if none),
     "dates_mentioned": dates in YYYY-MM-DD format (empty array if none),
-    "source_context": one of "ai_save", "meeting", "migration", "manual" or null
+    "source_context": one of "ai_save", "meeting", "migration", "manual" or null,
+    "fact_candidates": array of factual claims about named entities found in the text. Each object has:
+        "entity": name of the person/entity this fact is about (must match a name from the "people" array),
+        "predicate": the relationship or attribute (e.g. "from", "born_on", "works_at", "lives_in"),
+        "value": the structured value (use YYYY-MM-DD for dates),
+        "display": human-readable display text for the value,
+        "confidence": 0.0-1.0 how explicitly the fact is stated (1.0 = directly stated, 0.5 = implied),
+        "excerpt": the specific text that supports this fact
+    Only include facts explicitly stated in the text. Do not infer unstated facts. Empty array if none.
 }
 
 action_items loop_type values:
@@ -342,5 +360,15 @@ export async function extractMetadata(content: string): Promise<ThoughtMetadata>
       : [],
     dates_mentioned: Array.isArray(raw.dates_mentioned) ? raw.dates_mentioned : [],
     source_context: raw.source_context || null,
+    fact_candidates: Array.isArray(raw.fact_candidates)
+      ? raw.fact_candidates.map((fc: any) => ({
+          entity: String(fc.entity || ""),
+          predicate: String(fc.predicate || ""),
+          value: String(fc.value || ""),
+          display: String(fc.display || fc.value || ""),
+          confidence: typeof fc.confidence === "number" ? fc.confidence : 0,
+          excerpt: String(fc.excerpt || ""),
+        })).filter((fc: any) => fc.entity && fc.predicate && fc.value)
+      : [],
   };
 }
