@@ -3,6 +3,7 @@ import { query } from "../db.js";
 import pgvector from "pgvector";
 import { updatePipeline, createLoopsFromActionItems } from "../pipeline.js";
 import { resolveEntityMentions } from "../entities.js";
+import { config } from "../config.js";
 
 export const thoughtsRouter = new Hono();
 
@@ -227,6 +228,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       SET content = $1,
           embedding = $2,
           metadata = metadata || $3::jsonb,
+          embedding_model = $5,
+          embedded_at = $6,
           updated_at = now()
       WHERE id = $4 AND deleted_at IS NULL
       RETURNING id, content, metadata, created_at, updated_at`;
@@ -235,6 +238,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       pgvector.toSql(embedding),
       JSON.stringify({ ...metadataForStorage, content_hash }),
       id,
+      config.embeddingModel,
+      new Date().toISOString(),
     ];
   } else {
     // Embed-only: update content, embedding, content_hash
@@ -242,6 +247,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       SET content = $1,
           embedding = $2,
           metadata = jsonb_set(metadata, '{content_hash}', $3::jsonb),
+          embedding_model = $5,
+          embedded_at = $6,
           updated_at = now()
       WHERE id = $4 AND deleted_at IS NULL
       RETURNING id, content, metadata, created_at, updated_at`;
@@ -250,6 +257,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       pgvector.toSql(embedding),
       JSON.stringify(content_hash),
       id,
+      config.embeddingModel,
+      new Date().toISOString(),
     ];
   }
 
