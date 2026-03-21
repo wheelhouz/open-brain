@@ -196,7 +196,7 @@ export interface QueryRewrite {
   memory_types?: ("thoughts" | "loops" | "facts" | "all")[];
   prefer_open_loops?: boolean;
   entity_candidate_names?: string[];
-  intent_type?: "informational" | "task" | "person-summary" | "status" | "follow-up" | "decision";
+  intent_type?: "informational" | "task" | "person-summary" | "person-recency" | "status" | "follow-up" | "decision";
 }
 
 const REWRITE_PROMPT = `You rewrite conversational queries into standalone search queries for a personal knowledge base.
@@ -219,7 +219,7 @@ Rules:
 - "memory_types": array of types to search. Default ["all"]. Use ["loops"] for action/task/status queries, ["thoughts"] for informational/decision queries.
 - "prefer_open_loops": true ONLY when the user asks about pending actions, open tasks, to-dos, follow-ups, reminders, or what they are waiting on. Do NOT set true for decision-history queries like "what did we decide", "why did we choose", "what was the decision/plan/strategy" — those are informational lookups, not open-task queries.
 - "entity_candidate_names": extract person names mentioned. E.g. "What about Liz?" → ["Liz"].
-- "intent_type": one of "informational", "task", "person-summary", "status", "follow-up", "decision". Use "decision" for past decision lookups ("what did we decide"), not for open decision tasks.`;
+- "intent_type": one of "informational", "task", "person-summary", "person-recency", "status", "follow-up", "decision". Use "person-summary" for identity/knowledge queries ("Who is X?", "What do I know about X?", "Tell me about X"). Use "person-recency" for catch-up/latest queries ("What's latest with X?", "Catch me up on X", "What's going on with X?", "Where are we with X?", "Any updates on X?"). Use "status" or "task" for explicit action queries ("What am I waiting on from X?", "What's open with X?"). Use "decision" for past decision lookups ("what did we decide"), not for open decision tasks.`;
 
 export async function rewriteQuery(
   messages: Array<{ role: string; content: string }>,
@@ -248,7 +248,7 @@ export async function rewriteQuery(
     })) as { choices: Array<{ message: { content: string } }> };
 
     const raw = JSON.parse(data.choices[0].message.content);
-    const validIntentTypes = ["informational", "task", "person-summary", "status", "follow-up", "decision"];
+    const validIntentTypes = ["informational", "task", "person-summary", "person-recency", "status", "follow-up", "decision"];
     return {
       search_query: raw.search_query || fallback.search_query,
       filter: raw.filter && typeof raw.filter === "object" ? raw.filter : {},
