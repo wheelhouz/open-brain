@@ -41,7 +41,7 @@ describe("enqueueEmbeddingJob", () => {
     const params = mockQuery.mock.calls[0][1] as string[];
     const payload = JSON.parse(params[0]);
     expect(payload.loop_id).toBe("loop-1");
-    expect(payload.model).toBe("openai/text-embedding-3-small");
+    expect(payload.target_model).toBe("openai/text-embedding-3-small");
   });
 });
 

@@ -22,7 +22,7 @@ export async function enqueueEmbeddingJob(
     `INSERT INTO embedding_jobs (job_type, payload_json)
      VALUES ('loop_embedding', $1::jsonb)
      ON CONFLICT DO NOTHING`,
-    [JSON.stringify({ loop_id: loopId, model })],
+    [JSON.stringify({ loop_id: loopId, target_model: model })],
   );
 }
 
@@ -61,7 +61,7 @@ async function processJob(
   job: Record<string, unknown>,
 ): Promise<void> {
   const jobId = job.id as string;
-  const payload = job.payload_json as { loop_id: string; model: string };
+  const payload = job.payload_json as { loop_id: string; target_model: string };
 
   try {
     // Fetch loop content
@@ -73,7 +73,7 @@ async function processJob(
     if (loopResult.rows.length === 0) {
       // Loop no longer exists — mark job complete
       await query(
-        `UPDATE embedding_jobs SET status = 'complete' WHERE id = $1`,
+        `UPDATE embedding_jobs SET status = 'complete', completed_at = now(), last_error = 'loop not found' WHERE id = $1`,
         [jobId],
       );
       return;
@@ -89,29 +89,30 @@ async function processJob(
       `UPDATE open_loops
        SET embedding = $1::vector, embedding_model = $2, embedded_at = now()
        WHERE id = $3`,
-      [pgvector.toSql(embedding), payload.model, loop.id],
+      [pgvector.toSql(embedding), payload.target_model, loop.id],
     );
 
     // Mark job complete
     await query(
-      `UPDATE embedding_jobs SET status = 'complete' WHERE id = $1`,
+      `UPDATE embedding_jobs SET status = 'complete', completed_at = now() WHERE id = $1`,
       [jobId],
     );
   } catch (err) {
     const attemptCount = job.attempt_count as number;
+    const errorMsg = err instanceof Error ? err.message : String(err);
     if (attemptCount >= MAX_ATTEMPTS) {
       await query(
-        `UPDATE embedding_jobs SET status = 'failed' WHERE id = $1`,
-        [jobId],
+        `UPDATE embedding_jobs SET status = 'failed', last_error = $1, completed_at = now() WHERE id = $2`,
+        [errorMsg, jobId],
       );
     } else {
       // Reset to pending with backoff
       await query(
         `UPDATE embedding_jobs
-         SET status = 'pending', claimed_at = NULL,
-             available_at = now() + ($1 * interval '1 minute')
-         WHERE id = $2`,
-        [attemptCount, jobId],
+         SET status = 'pending', claimed_at = NULL, last_error = $1,
+             available_at = now() + ($2 * interval '1 minute')
+         WHERE id = $3`,
+        [errorMsg, attemptCount, jobId],
       );
     }
     console.error(`[queue] Job ${jobId} failed:`, err);
