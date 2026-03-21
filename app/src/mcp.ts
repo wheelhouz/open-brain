@@ -3,7 +3,7 @@ import { z } from "zod";
 import { query } from "./db.js";
 import { chatCompletion, generateEmbedding } from "./openrouter.js";
 import { capturePipeline } from "./pipeline.js";
-import { searchWithReranking } from "./rag.js";
+import { searchWithReranking, searchMemory } from "./rag.js";
 import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
 import pgvector from "pgvector";
 
@@ -41,7 +41,7 @@ export function createMcpServer(): McpServer {
   // search_thoughts
   server.tool(
     "search_thoughts",
-    "Search thoughts by semantic similarity to a natural language query. Retrieves a wider candidate pool and reranks by relevance, recency, and metadata overlap.",
+    "Search captured thoughts only by semantic similarity. For mixed memory search (thoughts + loops), use search_memory instead.",
     {
       query: z.string().describe("Natural language search query"),
       limit: z.number().default(10).describe("Max results to return"),
@@ -65,6 +65,29 @@ export function createMcpServer(): McpServer {
             text: JSON.stringify(result.thoughts, null, 2),
           },
         ],
+      };
+    },
+  );
+
+  // search_memory — broker-backed mixed retrieval
+  server.tool(
+    "search_memory",
+    "Search all memory types including thoughts and open loops by semantic similarity. Returns a mixed result set.",
+    {
+      query: z.string().describe("Natural language search query"),
+      limit: z.number().default(10).describe("Max results to return"),
+      filter: z.record(z.string(), z.unknown()).default({}).describe("Metadata filter"),
+      time_hint: z.enum(["recent", "last_month", "older"]).optional().describe("Temporal bias"),
+    },
+    async ({ query: searchQuery, limit, filter, time_hint }) => {
+      const result = await searchMemory({
+        query: searchQuery,
+        limit,
+        filter,
+        timeHint: time_hint || null,
+      });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result.candidates, null, 2) }],
       };
     },
   );
