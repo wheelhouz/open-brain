@@ -19,7 +19,13 @@ vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
 }));
 
-import { searchWithReranking, retrieveContext, formatContext } from "../rag.js";
+vi.mock("../config.js", () => ({
+  config: {
+    embeddingModel: "openai/text-embedding-3-small",
+  },
+}));
+
+import { searchWithReranking, retrieveContext, formatContext, searchMemory } from "../rag.js";
 import type { RetrievedThought } from "../rag.js";
 
 function makeThought(overrides: Partial<RetrievedThought> = {}): any {
@@ -186,6 +192,116 @@ describe("retrieveContext", () => {
     ]);
 
     expect(result.diagnostics.originalQuery).toBe("tell me more");
+  });
+});
+
+describe("searchMemory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("returns candidates array", async () => {
+    const thought = makeThought({ id: "t1", similarity: 0.8 });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [thought] })   // match_thoughts
+      .mockResolvedValue({ rows: [] });               // thread queries + loop queries
+
+    const result = await searchMemory({ query: "test query" });
+
+    expect(Array.isArray(result.candidates)).toBe(true);
+    expect(result.candidates.length).toBeGreaterThanOrEqual(1);
+    expect(result.candidates[0].memory_type).toBe("thought");
+    expect(result.candidates[0].id).toBe("t1");
+    expect(result.diagnostics).toBeDefined();
+    expect(typeof result.diagnostics.loopCandidateCount).toBe("number");
+    expect(typeof result.diagnostics.modelMismatchExclusions).toBe("number");
+  });
+
+  it("loop query SQL includes status = 'open' filter", async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    // We need to mock enough calls: match_thoughts, thread children, thread parents, mismatch count, loop query
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })   // match_thoughts
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    // The loop query should be the third call (after mismatch count)
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("status = 'open'");
+  });
+
+  it("loop query SQL includes embedding IS NOT NULL", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("embedding IS NOT NULL");
+  });
+
+  it("loop query SQL includes embedding_model filter", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("embedding_model");
+    // The model parameter should be passed
+    expect(loopCall![1]).toContain("openai/text-embedding-3-small");
+  });
+
+  it("merges thought and loop candidates sorted by score", async () => {
+    const thought = makeThought({ id: "t1", similarity: 0.7 });
+    const loopRow = {
+      id: "loop-1",
+      content: "Follow up on design review",
+      loop_type: "question",
+      status: "open",
+      source_thought_id: "t1",
+      created_at: new Date().toISOString(),
+      similarity: 0.9,
+      embedding_model: "openai/text-embedding-3-small",
+    };
+
+    // Reset and use mockImplementation to route responses by SQL content
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) {
+        return Promise.resolve({ rows: [thought] });
+      }
+      if (sql.includes("COUNT(*)")) {
+        return Promise.resolve({ rows: [{ count: 0 }] });
+      }
+      if (sql.includes("open_loops") && sql.includes("ORDER BY")) {
+        return Promise.resolve({ rows: [loopRow] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({ query: "design review" });
+
+    expect(result.candidates.length).toBe(2);
+    // Loop has higher similarity so should be first after sort
+    expect(result.candidates[0].memory_type).toBe("loop");
+    expect(result.candidates[0].id).toBe("loop-1");
+    expect(result.candidates[1].memory_type).toBe("thought");
   });
 });
 
