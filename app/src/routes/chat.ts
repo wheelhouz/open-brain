@@ -78,6 +78,16 @@ chatRouter.post("/", async (c) => {
       } catch { /* fallback to generic */ }
     }
 
+    // Guardrail: decision-history queries should not trigger loop injection
+    const queryText = lastUserMsg.content.toLowerCase();
+    const isDecisionHistory = /\b(what did (we|i|you) decide|decision (about|on|regarding)|why did (we|i) choose|what was the (decision|plan|strategy))\b/.test(queryText);
+    if (isDecisionHistory) {
+      rewrite.prefer_open_loops = false;
+      if (!rewrite.memory_types || rewrite.memory_types.includes("all")) {
+        rewrite.memory_types = ["thoughts"];
+      }
+    }
+
     const resolvedEntityId = resolvedEntities.find(e => e.entity_id !== null)?.entity_id;
     const isPersonSummary = rewrite.intent_type === "person-summary";
     const hasLoopSignal = rewrite.intent_type === "task" || rewrite.intent_type === "status" || rewrite.intent_type === "follow-up" || rewrite.prefer_open_loops;

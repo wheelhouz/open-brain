@@ -217,9 +217,9 @@ Rules:
 - "time_hint" is "recent", "last_month", "older", or null. Only set if user clearly references time.
 - "search_query" must be self-contained — do not use pronouns referring to earlier messages.
 - "memory_types": array of types to search. Default ["all"]. Use ["loops"] for action/task/status queries, ["thoughts"] for informational/decision queries.
-- "prefer_open_loops": true when user asks about pending actions or open items.
+- "prefer_open_loops": true ONLY when the user asks about pending actions, open tasks, to-dos, follow-ups, reminders, or what they are waiting on. Do NOT set true for decision-history queries like "what did we decide", "why did we choose", "what was the decision/plan/strategy" — those are informational lookups, not open-task queries.
 - "entity_candidate_names": extract person names mentioned. E.g. "What about Liz?" → ["Liz"].
-- "intent_type": one of "informational", "task", "person-summary", "status", "follow-up", "decision".`;
+- "intent_type": one of "informational", "task", "person-summary", "status", "follow-up", "decision". Use "decision" for past decision lookups ("what did we decide"), not for open decision tasks.`;
 
 export async function rewriteQuery(
   messages: Array<{ role: string; content: string }>,
