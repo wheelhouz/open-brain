@@ -166,6 +166,13 @@ export interface SourceThought {
   similarity: number;
 }
 
+export interface SourceLoop {
+  id: string;
+  content: string;
+  score: number;
+  loop_type: string;
+}
+
 // API methods
 export const api = {
   validate: () => request<StatsResponse>("/api/stats"),
@@ -470,7 +477,7 @@ export const api = {
   chat: async (
     messages: ChatMessage[],
     onChunk: (text: string) => void,
-    onSources: (thoughts: SourceThought[]) => void,
+    onSources: (thoughts: SourceThought[], loops: SourceLoop[]) => void,
     entityId?: string,
   ) => {
     const key = getKey();
@@ -509,7 +516,7 @@ export const api = {
         try {
           const parsed = JSON.parse(trimmed.slice(6));
           if (parsed.type === "chunk") onChunk(parsed.content);
-          else if (parsed.type === "sources") onSources(parsed.thoughts);
+          else if (parsed.type === "sources") onSources(parsed.thoughts || [], parsed.loops || []);
         } catch {
           // skip malformed events
         }

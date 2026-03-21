@@ -991,6 +991,39 @@ code:not(pre code) {
   white-space: nowrap;
 }
 
+.chat-loop-chip {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.15s;
+  max-width: 16rem;
+}
+.chat-loop-chip:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+.chat-loop-chip:active {
+  transform: scale(0.97);
+}
+
+.chat-loop-type {
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  white-space: nowrap;
+  padding: 0.0625rem 0.375rem;
+  border-radius: 4px;
+  background: var(--accent-bg, rgba(99, 102, 241, 0.1));
+}
+
 /* Composer — floating pill with gradient fade */
 .chat-composer {
   position: relative;
