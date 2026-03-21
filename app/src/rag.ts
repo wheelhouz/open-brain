@@ -418,6 +418,55 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
         },
       });
     }
+
+    // Lexical fallback: when semantic results are sparse, supplement with text match
+    const LEXICAL_FALLBACK_THRESHOLD = 3;
+    const topScore = reranked.length > 0 ? reranked[0].similarity : 0;
+    if (reranked.length < LEXICAL_FALLBACK_THRESHOLD || topScore < 0.3) {
+      // Extract key terms from query (words 3+ chars, skip stopwords)
+      const stopwords = new Set(["the", "what", "about", "that", "this", "with", "from", "have", "been", "does", "did", "was", "were", "are", "for", "and", "how", "why", "who", "when", "where", "which"]);
+      const terms = searchQuery.toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length >= 3 && !stopwords.has(w));
+
+      if (terms.length > 0) {
+        const existingIds = new Set(candidates.map((c) => c.id));
+        const pattern = terms.map((t) => `%${t}%`).join("");
+        // Use ILIKE with each term individually for broader matching
+        const termConditions = terms.map((_, i) => `content ILIKE $${i + 1}`);
+        const lexicalResult = await query(
+          `SELECT id, content, metadata, created_at, parent_id
+           FROM thoughts
+           WHERE deleted_at IS NULL
+             AND (${termConditions.join(" OR ")})
+           ORDER BY created_at DESC
+           LIMIT $${terms.length + 1}`,
+          [...terms.map((t) => `%${t}%`), limit],
+        );
+
+        for (const r of lexicalResult.rows as any[]) {
+          if (!existingIds.has(r.id)) {
+            existingIds.add(r.id);
+            // Count how many terms matched for scoring
+            const contentLower = r.content.toLowerCase();
+            const matchCount = terms.filter((t) => contentLower.includes(t)).length;
+            candidates.push({
+              memory_type: "thought",
+              id: r.id,
+              content: r.content,
+              source: "thoughts",
+              score: 0.15 + 0.05 * matchCount, // lower than vector results
+              timestamp: r.created_at,
+              metadata: {
+                ...r.metadata,
+                parent_id: r.parent_id,
+                _lexical_fallback: true,
+              },
+            });
+          }
+        }
+      }
+    }
   }
 
   // Loop retrieval
