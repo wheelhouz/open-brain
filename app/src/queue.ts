@@ -5,7 +5,7 @@ import pgvector from "pgvector";
 
 const MAX_ATTEMPTS = 5;
 const WORKER_POLL_INTERVAL_MS = 30_000;
-const CLAIM_LEASE_TIMEOUT_MS = 5 * 60 * 1000;
+
 const RATE_LIMIT_DELAY_MS = parseInt(
   process.env.EMBEDDING_RATE_LIMIT_MS || "200",
   10,
