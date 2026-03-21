@@ -621,6 +621,264 @@ describe("searchMemory — lexical fallback", () => {
   });
 });
 
+describe("searchMemory — provenance-based loop retrieval", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("entity-linked loop without embedding surfaces for person action query", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string, params?: any[]) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      // Structural query — returns loop without embedding
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            { id: "loop-1", content: "Follow up", loop_type: "task", status: "open", source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought similarity
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts")) {
+        return Promise.resolve({ rows: [{ id: "t1", similarity: 0.7 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what's open for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loops = result.candidates.filter((c) => c.memory_type === "loop");
+    expect(loops.length).toBe(1);
+    expect(loops[0].id).toBe("loop-1");
+    expect(loops[0].metadata._provenance).toBe(true);
+  });
+
+  it("source-thought scoring boosts entity-linked loops with weak text", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            { id: "loop-generic", content: "Follow up", loop_type: "task", status: "open", source_thought_id: "t-liz", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought has strong similarity to the query
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts")) {
+        return Promise.resolve({ rows: [{ id: "t-liz", similarity: 0.85 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what tasks are open for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loop = result.candidates.find((c) => c.id === "loop-generic");
+    expect(loop).toBeDefined();
+    // Score should be source-thought similarity (0.85) + entity boost (0.15) = 1.0
+    expect(loop!.score).toBeCloseTo(1.0, 1);
+  });
+
+  it("no-embedding fallback: loop with no source-thought embedding uses structural default", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            { id: "loop-orphan", content: "Check in", loop_type: "task", status: "open", source_thought_id: "t-gone", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought has no embedding (not returned)
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts")) {
+        return Promise.resolve({ rows: [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what's pending for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loop = result.candidates.find((c) => c.id === "loop-orphan");
+    expect(loop).toBeDefined();
+    // Should still surface with conservative structural default (0.25) + entity boost (0.15) = 0.40
+    expect(loop!.score).toBeCloseTo(0.40, 1);
+  });
+
+  it("non-action person query does NOT trigger structural loop recall", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "Who is Tony?",
+      memoryTypes: ["loops"],
+      entityIds: ["entity-tony"],
+      preferOpenLoops: false, // not an action query
+    });
+
+    // Should NOT have a structural query
+    const structuralCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("DISTINCT ON") && call[0].includes("entity_mentions"),
+    );
+    expect(structuralCall).toBeUndefined();
+  });
+
+  it("generic non-person queries use standard vector similarity only", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "what are my open tasks",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      // no entityIds
+    });
+
+    // Should NOT have a structural provenance query
+    const structuralCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("DISTINCT ON") && call[0].includes("entity_mentions"),
+    );
+    expect(structuralCall).toBeUndefined();
+
+    // Should have direct injection (non-entity action query path)
+    const directCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY created_at"),
+    );
+    expect(directCall).toBeDefined();
+  });
+
+  it("multi-person source thought: loops rank by source thought relevance", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            // Loop from multi-person thought (mentions Liz AND Maya)
+            { id: "loop-shared", content: "Send update", loop_type: "task", status: "open", source_thought_id: "t-multi", created_at: "2026-03-18T00:00:00Z" },
+            // Loop from Liz-specific thought
+            { id: "loop-liz", content: "Review proposal", loop_type: "task", status: "open", source_thought_id: "t-liz-only", created_at: "2026-03-19T00:00:00Z" },
+          ],
+        });
+      }
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts")) {
+        return Promise.resolve({
+          rows: [
+            { id: "t-multi", similarity: 0.4 },     // shared context — weaker match
+            { id: "t-liz-only", similarity: 0.9 },   // Liz-specific — strong match
+          ],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what's open for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loops = result.candidates.filter((c) => c.memory_type === "loop");
+    expect(loops.length).toBe(2);
+    // Liz-specific loop should rank higher than shared one
+    const lizLoop = loops.find((c) => c.id === "loop-liz");
+    const sharedLoop = loops.find((c) => c.id === "loop-shared");
+    expect(lizLoop!.score).toBeGreaterThan(sharedLoop!.score);
+  });
+
+  it("dedup: same loop from structural and semantic paths appears once with best score", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            { id: "loop-dup", content: "Follow up with Liz", loop_type: "task", status: "open", source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought scoring
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts")) {
+        return Promise.resolve({ rows: [{ id: "t1", similarity: 0.6 }] });
+      }
+      // Semantic also returns the same loop with higher similarity
+      if (sql.includes("open_loops") && sql.includes("ORDER BY embedding")) {
+        return Promise.resolve({
+          rows: [{
+            id: "loop-dup", content: "Follow up with Liz", loop_type: "task", status: "open",
+            source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z",
+            similarity: 0.8, embedding_model: "openai/text-embedding-3-small",
+          }],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "Liz tasks",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loops = result.candidates.filter((c) => c.memory_type === "loop");
+    expect(loops.length).toBe(1); // deduplicated
+    // Should take the better score: max(structural 0.6+0.15, semantic 0.8+0.15) = 0.95
+    expect(loops[0].score).toBeCloseTo(0.95, 1);
+  });
+
+  it("closed loops excluded, snoozed-active included by structural query", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        // Verify the SQL includes the correct status filter
+        expect(sql).toContain("status = 'open'");
+        expect(sql).toContain("snoozed");
+        return Promise.resolve({ rows: [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "open items for Tony",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-tony"],
+    });
+
+    // The structural query should have been called
+    const structuralCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("DISTINCT ON"),
+    );
+    expect(structuralCall).toBeDefined();
+  });
+});
+
 describe("formatContext", () => {
   it("returns empty message for no thoughts", () => {
     expect(formatContext([])).toContain("No relevant thoughts");

@@ -4,6 +4,7 @@ import { query } from "./db.js";
 import { chatCompletion, generateEmbedding } from "./openrouter.js";
 import { capturePipeline } from "./pipeline.js";
 import { searchWithReranking, searchMemory } from "./rag.js";
+import { resolveEntityCandidates } from "./entities.js";
 import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
 import pgvector from "pgvector";
 
@@ -72,19 +73,33 @@ export function createMcpServer(): McpServer {
   // search_memory — broker-backed mixed retrieval
   server.tool(
     "search_memory",
-    "Search all memory types including thoughts and open loops by semantic similarity. Returns a mixed result set.",
+    "Search all memory types including thoughts and open loops by semantic similarity. Returns a mixed result set. Optionally scope to specific people via entity_names for provenance-based loop retrieval.",
     {
       query: z.string().describe("Natural language search query"),
       limit: z.number().default(10).describe("Max results to return"),
       filter: z.record(z.string(), z.unknown()).default({}).describe("Metadata filter"),
       time_hint: z.enum(["recent", "last_month", "older"]).optional().describe("Temporal bias"),
+      entity_names: z.array(z.string()).optional().describe("Person names to scope retrieval — resolves to canonical entities for provenance-based loop recall"),
+      prefer_open_loops: z.boolean().optional().describe("When true, boosts retrieval of open action items and enables provenance-based loop recall for resolved entities"),
     },
-    async ({ query: searchQuery, limit, filter, time_hint }) => {
+    async ({ query: searchQuery, limit, filter, time_hint, entity_names, prefer_open_loops }) => {
+      // Resolve entity names to IDs if provided
+      let entityIds: string[] | undefined;
+      if (entity_names && entity_names.length > 0) {
+        try {
+          const resolved = await resolveEntityCandidates(entity_names);
+          const ids = resolved.filter((e) => e.entity_id !== null).map((e) => e.entity_id as string);
+          if (ids.length > 0) entityIds = ids;
+        } catch { /* fall back to generic search */ }
+      }
+
       const result = await searchMemory({
         query: searchQuery,
         limit,
         filter,
         timeHint: time_hint || null,
+        entityIds,
+        preferOpenLoops: prefer_open_loops,
       });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.candidates, null, 2) }],
