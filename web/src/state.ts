@@ -4,6 +4,7 @@ export const isAuthenticated = signal(!!localStorage.getItem("brain_access_key")
 export const selectedThoughtId = signal<string | null>(null);
 export const lastDeletedId = signal<string | null>(null);
 export const selectedLoopId = signal<string | null>(null);
+export const selectedEntityName = signal<string | null>(null);
 export const lastCapturedThought = signal<{ id: string; content: string; metadata: any; created_at: string } | null>(null);
 export const theme = signal<"dark" | "light">(
   (localStorage.getItem("theme") as "dark" | "light") || "dark",

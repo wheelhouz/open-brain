@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { selectedThoughtId, selectedLoopId, lastDeletedId, showToast } from "../state";
+import { selectedThoughtId, selectedLoopId, selectedEntityName, lastDeletedId, showToast } from "../state";
 import { api, type Thought, type Loop } from "../api";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThoughtCard } from "./ThoughtCard";
@@ -467,8 +467,7 @@ export function DetailPanel() {
                       key={p}
                       class="text-xs px-2.5 py-1 rounded-md bg-[var(--type-person-note)]/15 text-[var(--type-person-note)] cursor-pointer hover:bg-[var(--type-person-note)]/25 active:scale-95 transition-all"
                       onClick={() => {
-                        selectedThoughtId.value = null;
-                        route("/people?selected=" + encodeURIComponent(p));
+                        selectedEntityName.value = p;
                       }}
                     >
                       {p}

@@ -1,5 +1,6 @@
 import { route } from "preact-router";
 import type { Thought } from "../api";
+import { selectedEntityName } from "../state";
 import { extractHeadline, plainTextPreview } from "../lib/markdown";
 import { typeColor, typeLabel, relativeTime } from "../lib/format";
 import { SimilarityBar } from "./SimilarityBar";
@@ -144,7 +145,7 @@ export function ThoughtCard({
                   class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--type-person-note)]/20 text-[var(--type-person-note)] cursor-pointer hover:opacity-80"
                   onClick={(e) => {
                     e.stopPropagation();
-                    route("/people?selected=" + encodeURIComponent(p));
+                    selectedEntityName.value = p;
                   }}
                 >
                   {p}
