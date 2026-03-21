@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { query } from "../db.js";
+import { query, pool } from "../db.js";
 import pgvector from "pgvector";
 import { updatePipeline, createLoopsFromActionItems } from "../pipeline.js";
-import { resolveEntityMentions } from "../entities.js";
+import { resolveEntityMentions, computeEntityMentions } from "../entities.js";
+import { config } from "../config.js";
 
 export const thoughtsRouter = new Hono();
 
@@ -31,8 +32,19 @@ thoughtsRouter.get("/", async (c) => {
     params.push(topic);
   }
   if (person) {
-    conditions.push(`metadata->'people' ? $${paramIdx++}`);
-    params.push(person);
+    // Try entity-backed resolution first
+    const entityResult = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
+      [person],
+    );
+    if (entityResult.rows.length > 0) {
+      conditions.push(`id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = $${paramIdx++})`);
+      params.push(entityResult.rows[0].id);
+    } else {
+      // Fallback to metadata for unresolved names
+      conditions.push(`metadata->'people' ? $${paramIdx++}`);
+      params.push(person);
+    }
   }
   if (days) {
     conditions.push(`created_at > now() - interval '1 day' * $${paramIdx++}`);
@@ -227,6 +239,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       SET content = $1,
           embedding = $2,
           metadata = metadata || $3::jsonb,
+          embedding_model = $5,
+          embedded_at = $6,
           updated_at = now()
       WHERE id = $4 AND deleted_at IS NULL
       RETURNING id, content, metadata, created_at, updated_at`;
@@ -235,6 +249,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       pgvector.toSql(embedding),
       JSON.stringify({ ...metadataForStorage, content_hash }),
       id,
+      config.embeddingModel,
+      new Date().toISOString(),
     ];
   } else {
     // Embed-only: update content, embedding, content_hash
@@ -242,6 +258,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       SET content = $1,
           embedding = $2,
           metadata = jsonb_set(metadata, '{content_hash}', $3::jsonb),
+          embedding_model = $5,
+          embedded_at = $6,
           updated_at = now()
       WHERE id = $4 AND deleted_at IS NULL
       RETURNING id, content, metadata, created_at, updated_at`;
@@ -250,6 +268,8 @@ thoughtsRouter.patch("/:id", async (c) => {
       pgvector.toSql(embedding),
       JSON.stringify(content_hash),
       id,
+      config.embeddingModel,
+      new Date().toISOString(),
     ];
   }
 
@@ -265,26 +285,60 @@ thoughtsRouter.patch("/:id", async (c) => {
   // Re-resolve entity mentions and recreate loops when metadata was re-extracted
   if (metadata) {
     const people = Array.isArray(metadata.people) ? metadata.people : [];
-    if (people.length > 0) {
+
+    // Transactional mention invalidation
+    try {
+      const newMentions = await computeEntityMentions(people, id);
+      // Only replace if compute succeeded
+      const client = await pool.connect();
       try {
-        await resolveEntityMentions(people, id);
+        await client.query("BEGIN");
+        await client.query(`DELETE FROM entity_mentions WHERE thought_id = $1`, [id]);
+        for (const m of newMentions) {
+          await client.query(
+            `INSERT INTO entity_mentions (entity_id, thought_id, raw_mention_text, normalized_mention_text, resolution_state, resolution_confidence, resolution_metadata_json)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (entity_id, thought_id) DO NOTHING`,
+            [m.entity_id, m.thought_id, m.raw_mention_text, m.normalized_mention_text, m.resolution_state, m.resolution_confidence, JSON.stringify(m.resolution_metadata_json)],
+          );
+        }
+        await client.query("COMMIT");
       } catch {
-        // Don't fail update if entity resolution fails
+        await client.query("ROLLBACK");
+      } finally {
+        client.release();
       }
+    } catch {
+      // If pure compute fails, existing mentions survive
     }
 
-    // Recreate loops: delete existing open loops, preserve closed/snoozed
+    // Flag facts sourced from this thought for re-review
+    try {
+      await query(
+        `UPDATE entity_facts
+         SET review_state = 'pending', updated_at = now()
+         WHERE review_state = 'accepted'
+           AND id IN (
+             SELECT fact_id FROM entity_fact_evidence WHERE thought_id = $1
+           )`,
+        [id],
+      );
+    } catch {
+      // Don't fail update if fact flagging fails
+    }
+
+    // Always delete open loops, then conditionally recreate
     const actionItems = Array.isArray(metadata.action_items) ? metadata.action_items : [];
-    if (actionItems.length > 0) {
-      try {
-        await query(
-          `DELETE FROM open_loops WHERE source_thought_id = $1 AND status = 'open'`,
-          [id],
-        );
+    try {
+      await query(
+        `DELETE FROM open_loops WHERE source_thought_id = $1 AND status = 'open'`,
+        [id],
+      );
+      if (actionItems.length > 0) {
         await createLoopsFromActionItems(actionItems, id);
-      } catch {
-        // Don't fail update if loop recreation fails
       }
+    } catch {
+      // Don't fail update if loop cleanup/recreation fails
     }
   }
 

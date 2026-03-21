@@ -1,5 +1,6 @@
 import { query } from "./db.js";
 import { generateEmbedding, rewriteQuery } from "./openrouter.js";
+import { config } from "./config.js";
 import pgvector from "pgvector";
 
 export interface RetrievedThought {
@@ -29,6 +30,32 @@ export interface RAGResult {
 
 export interface RAGContext extends RAGResult {
   rewrittenQuery: string;
+}
+
+export interface MemoryCandidate {
+  memory_type: "thought" | "loop" | "fact";
+  id: string;
+  content: string;
+  source: string;
+  score: number;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface SearchMemoryOptions {
+  query: string;
+  filter?: Record<string, unknown>;
+  timeHint?: "recent" | "last_month" | "older" | null;
+  limit?: number;
+  threshold?: number;
+  memoryTypes?: ("thoughts" | "loops" | "facts" | "all")[];
+  preferOpenLoops?: boolean;
+  entityIds?: string[];
+}
+
+export interface SearchMemoryResult {
+  candidates: MemoryCandidate[];
+  diagnostics: RAGDiagnostics & { loopCandidateCount: number; modelMismatchExclusions: number };
 }
 
 const RECENCY_HALF_LIFE_DAYS = 30;
@@ -256,6 +283,321 @@ export async function retrieveContext(
   };
 }
 
+export async function searchMemory(options: SearchMemoryOptions): Promise<SearchMemoryResult> {
+  const {
+    query: searchQuery,
+    filter = {},
+    timeHint = null,
+    limit = 10,
+    threshold = 0.25,
+    memoryTypes = ["all"],
+  } = options;
+
+  const start = Date.now();
+
+  const shouldQuery = (type: "thoughts" | "loops" | "facts") =>
+    memoryTypes.includes("all") || memoryTypes.includes(type);
+
+  const embedding = await generateEmbedding(searchQuery);
+  const embeddingSql = pgvector.toSql(embedding);
+
+  const candidates: MemoryCandidate[] = [];
+  let loopCandidateCount = 0;
+  let modelMismatchExclusions = 0;
+
+  // Thought retrieval — reuse existing patterns
+  if (shouldQuery("thoughts")) {
+    const dbFilter: Record<string, unknown> = {};
+    if (filter.people && Array.isArray(filter.people) && filter.people.length > 0) {
+      dbFilter.people = filter.people;
+    }
+    if (filter.topics && Array.isArray(filter.topics) && filter.topics.length > 0) {
+      dbFilter.topics = filter.topics;
+    }
+
+    const poolSize = Math.max(limit * 2, 15);
+    const result = await query(
+      `SELECT * FROM match_thoughts($1, $2, $3, $4)`,
+      [embeddingSql, threshold, poolSize, JSON.stringify(dbFilter)],
+    );
+
+    let thoughtCandidates: RankCandidate[] = result.rows.map((r: any) => ({
+      id: r.id,
+      content: r.content,
+      metadata: r.metadata,
+      similarity: r.similarity,
+      created_at: r.created_at,
+      parent_id: r.parent_id,
+    }));
+
+    // Recency slice
+    if (timeHint === "recent") {
+      const recentResult = await query(
+        `SELECT id, content, metadata, created_at FROM thoughts
+         WHERE deleted_at IS NULL AND created_at > now() - interval '7 days'
+         ORDER BY created_at DESC LIMIT 5`,
+      );
+      const existingIds = new Set(thoughtCandidates.map((c) => c.id));
+      for (const r of recentResult.rows as any[]) {
+        if (!existingIds.has(r.id)) {
+          thoughtCandidates.push({
+            id: r.id,
+            content: r.content,
+            metadata: r.metadata,
+            similarity: 0.3,
+            created_at: r.created_at,
+          });
+        }
+      }
+    }
+
+    const reranked = rerank(thoughtCandidates, filter, timeHint, limit);
+
+    // Thread expansion for top 3
+    const top3 = reranked.slice(0, 3);
+    if (top3.length > 0) {
+      const top3Ids = top3.map((t) => t.id);
+      const parentIds = top3.map((t) => t.parent_id).filter(Boolean) as string[];
+
+      const [childrenResult, parentsResult] = await Promise.all([
+        query(
+          `SELECT parent_id, content, created_at FROM thoughts
+           WHERE parent_id = ANY($1) AND deleted_at IS NULL
+           ORDER BY created_at LIMIT 6`,
+          [top3Ids],
+        ),
+        parentIds.length > 0
+          ? query(
+              `SELECT id, content, created_at FROM thoughts WHERE id = ANY($1)`,
+              [parentIds],
+            )
+          : Promise.resolve({ rows: [] }),
+      ]);
+
+      const threadMap = new Map<string, Array<{ content: string; created_at: string }>>();
+      for (const row of childrenResult.rows as any[]) {
+        const arr = threadMap.get(row.parent_id) || [];
+        arr.push({ content: row.content, created_at: row.created_at });
+        threadMap.set(row.parent_id, arr);
+      }
+
+      const parentMap = new Map<string, { content: string; created_at: string }>();
+      for (const row of parentsResult.rows as any[]) {
+        parentMap.set(row.id, { content: row.content, created_at: row.created_at });
+      }
+
+      for (const thought of reranked) {
+        const thread: Array<{ content: string; created_at: string }> = [];
+        const parentId = thought.parent_id;
+        if (parentId && parentMap.has(parentId)) {
+          thread.push(parentMap.get(parentId)!);
+        }
+        const children = threadMap.get(thought.id);
+        if (children) {
+          thread.push(...children.slice(0, 2));
+        }
+        if (thread.length > 0) {
+          thought.thread = thread;
+        }
+      }
+    }
+
+    // Map to MemoryCandidate
+    for (const t of reranked) {
+      candidates.push({
+        memory_type: "thought",
+        id: t.id,
+        content: t.content,
+        source: "thoughts",
+        score: t.similarity,
+        timestamp: t.created_at,
+        metadata: {
+          ...t.metadata,
+          parent_id: t.parent_id,
+          thread: t.thread,
+        },
+      });
+    }
+
+    // Lexical fallback: when semantic results are sparse, supplement with text match
+    const LEXICAL_FALLBACK_THRESHOLD = 3;
+    const topScore = reranked.length > 0 ? reranked[0].similarity : 0;
+    if (reranked.length < LEXICAL_FALLBACK_THRESHOLD || topScore < 0.3) {
+      // Extract key terms from query (words 3+ chars, skip stopwords)
+      const stopwords = new Set(["the", "what", "about", "that", "this", "with", "from", "have", "been", "does", "did", "was", "were", "are", "for", "and", "how", "why", "who", "when", "where", "which"]);
+      const terms = searchQuery.toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length >= 3 && !stopwords.has(w));
+
+      if (terms.length > 0) {
+        const existingIds = new Set(candidates.map((c) => c.id));
+        const pattern = terms.map((t) => `%${t}%`).join("");
+        // Use ILIKE with each term individually for broader matching
+        const termConditions = terms.map((_, i) => `content ILIKE $${i + 1}`);
+        const lexicalResult = await query(
+          `SELECT id, content, metadata, created_at, parent_id
+           FROM thoughts
+           WHERE deleted_at IS NULL
+             AND (${termConditions.join(" OR ")})
+           ORDER BY created_at DESC
+           LIMIT $${terms.length + 1}`,
+          [...terms.map((t) => `%${t}%`), limit],
+        );
+
+        for (const r of lexicalResult.rows as any[]) {
+          if (!existingIds.has(r.id)) {
+            existingIds.add(r.id);
+            // Count how many terms matched for scoring
+            const contentLower = r.content.toLowerCase();
+            const matchCount = terms.filter((t) => contentLower.includes(t)).length;
+            candidates.push({
+              memory_type: "thought",
+              id: r.id,
+              content: r.content,
+              source: "thoughts",
+              score: 0.15 + 0.05 * matchCount, // lower than vector results
+              timestamp: r.created_at,
+              metadata: {
+                ...r.metadata,
+                parent_id: r.parent_id,
+                _lexical_fallback: true,
+              },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Loop retrieval
+  if (shouldQuery("loops")) {
+    const currentModel = config.embeddingModel;
+    const loopIds = new Set<string>();
+
+    // Count model mismatches for diagnostics
+    const mismatchResult = await query(
+      `SELECT COUNT(*)::int as count FROM open_loops
+       WHERE embedding IS NOT NULL
+         AND embedding_model != $1
+         AND (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`,
+      [currentModel],
+    );
+    modelMismatchExclusions = mismatchResult.rows[0]?.count ?? 0;
+
+    // Fix 1: Entity-filtered loop retrieval
+    // When entity IDs are provided, constrain loops to those linked via entity_mentions
+    let entityFilter = "";
+    const loopParams: unknown[] = [embeddingSql, currentModel, limit];
+    if (options.entityIds && options.entityIds.length > 0) {
+      entityFilter = `AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($4))`;
+      loopParams.push(options.entityIds);
+    }
+
+    const loopResult = await query(
+      `SELECT id, content, loop_type, status, source_thought_id, created_at,
+              1 - (embedding <=> $1) as similarity,
+              embedding_model
+       FROM open_loops
+       WHERE embedding IS NOT NULL
+         AND embedding_model = $2
+         AND (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))
+         ${entityFilter}
+       ORDER BY embedding <=> $1
+       LIMIT $3`,
+      loopParams,
+    );
+
+    for (const r of loopResult.rows as any[]) {
+      if (r.similarity >= threshold) {
+        loopIds.add(r.id);
+        candidates.push({
+          memory_type: "loop",
+          id: r.id,
+          content: r.content,
+          source: "open_loops",
+          score: r.similarity,
+          timestamp: r.created_at,
+          metadata: {
+            loop_type: r.loop_type,
+            status: r.status,
+            source_thought_id: r.source_thought_id,
+            embedding_model: r.embedding_model,
+          },
+        });
+      }
+    }
+
+    // Fix 2: Status-query loop injection
+    // When intent signals open tasks, supplement vector results with direct actionable-loop fetch
+    // Same pattern as recent-thought augmentation
+    if (options.preferOpenLoops) {
+      let directSql = `SELECT id, content, loop_type, status, source_thought_id, created_at
+         FROM open_loops
+         WHERE (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`;
+      const directParams: unknown[] = [];
+      let paramIdx = 1;
+
+      if (options.entityIds && options.entityIds.length > 0) {
+        directSql += ` AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($${paramIdx++}))`;
+        directParams.push(options.entityIds);
+      }
+
+      directSql += ` ORDER BY created_at DESC LIMIT $${paramIdx}`;
+      directParams.push(limit);
+
+      const directResult = await query(directSql, directParams);
+
+      for (const r of directResult.rows as any[]) {
+        if (!loopIds.has(r.id)) {
+          loopIds.add(r.id);
+          candidates.push({
+            memory_type: "loop",
+            id: r.id,
+            content: r.content,
+            source: "open_loops",
+            score: 0.3, // baseline score for injected loops
+            timestamp: r.created_at,
+            metadata: {
+              loop_type: r.loop_type,
+              status: r.status,
+              source_thought_id: r.source_thought_id,
+            },
+          });
+        }
+      }
+    }
+
+    loopCandidateCount = loopIds.size;
+
+    if (modelMismatchExclusions > 0) {
+      console.log(JSON.stringify({
+        event: "search_memory_model_mismatch",
+        exclusions: modelMismatchExclusions,
+        currentModel,
+      }));
+    }
+  }
+
+  // Merge: sort by score descending, take top limit
+  candidates.sort((a, b) => b.score - a.score);
+  const finalCandidates = candidates.slice(0, limit);
+
+  const diagnostics = {
+    rewrittenQuery: searchQuery,
+    filter,
+    timeHint,
+    candidateCount: candidates.length,
+    finalCount: finalCandidates.length,
+    latencyMs: Date.now() - start,
+    loopCandidateCount,
+    modelMismatchExclusions,
+  };
+
+  console.log(JSON.stringify({ event: "search_memory", ...diagnostics }));
+
+  return { candidates: finalCandidates, diagnostics };
+}
+
 export function formatContext(thoughts: RetrievedThought[]): string {
   if (thoughts.length === 0) {
     return "No relevant thoughts were found in the knowledge base for this query.";
@@ -267,6 +609,7 @@ export function formatContext(thoughts: RetrievedThought[]): string {
       const type = (t.metadata?.type as string) || "note";
       const similarity = (t.similarity * 100).toFixed(0);
       const topics = Array.isArray(t.metadata?.topics) ? (t.metadata.topics as string[]).join(", ") : "";
+      // people from cached metadata — display convenience, not source of truth (entity_mentions is authoritative)
       const people = Array.isArray(t.metadata?.people) ? (t.metadata.people as string[]).join(", ") : "";
 
       let header = `[Thought ${i + 1}] (relevance: ${similarity}%, ${date}, ${type})`;

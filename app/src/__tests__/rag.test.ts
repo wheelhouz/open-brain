@@ -19,7 +19,13 @@ vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
 }));
 
-import { searchWithReranking, retrieveContext, formatContext } from "../rag.js";
+vi.mock("../config.js", () => ({
+  config: {
+    embeddingModel: "openai/text-embedding-3-small",
+  },
+}));
+
+import { searchWithReranking, retrieveContext, formatContext, searchMemory } from "../rag.js";
 import type { RetrievedThought } from "../rag.js";
 
 function makeThought(overrides: Partial<RetrievedThought> = {}): any {
@@ -186,6 +192,432 @@ describe("retrieveContext", () => {
     ]);
 
     expect(result.diagnostics.originalQuery).toBe("tell me more");
+  });
+});
+
+describe("searchMemory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("returns candidates array", async () => {
+    const thought = makeThought({ id: "t1", similarity: 0.8 });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [thought] })   // match_thoughts
+      .mockResolvedValue({ rows: [] });               // thread queries + loop queries
+
+    const result = await searchMemory({ query: "test query" });
+
+    expect(Array.isArray(result.candidates)).toBe(true);
+    expect(result.candidates.length).toBeGreaterThanOrEqual(1);
+    expect(result.candidates[0].memory_type).toBe("thought");
+    expect(result.candidates[0].id).toBe("t1");
+    expect(result.diagnostics).toBeDefined();
+    expect(typeof result.diagnostics.loopCandidateCount).toBe("number");
+    expect(typeof result.diagnostics.modelMismatchExclusions).toBe("number");
+  });
+
+  it("loop query SQL includes status = 'open' filter", async () => {
+    mockQuery.mockResolvedValue({ rows: [] });
+    // We need to mock enough calls: match_thoughts, thread children, thread parents, mismatch count, loop query
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })   // match_thoughts
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    // The loop query should be the third call (after mismatch count)
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("status = 'open'");
+  });
+
+  it("loop query SQL includes embedding IS NOT NULL", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("embedding IS NOT NULL");
+  });
+
+  it("loop query SQL includes embedding_model filter", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] })   // mismatch count
+      .mockResolvedValueOnce({ rows: [] });               // loop query
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("embedding_model");
+    // The model parameter should be passed
+    expect(loopCall![1]).toContain("openai/text-embedding-3-small");
+  });
+
+  it("merges thought and loop candidates sorted by score", async () => {
+    const thought = makeThought({ id: "t1", similarity: 0.7 });
+    const loopRow = {
+      id: "loop-1",
+      content: "Follow up on design review",
+      loop_type: "question",
+      status: "open",
+      source_thought_id: "t1",
+      created_at: new Date().toISOString(),
+      similarity: 0.9,
+      embedding_model: "openai/text-embedding-3-small",
+    };
+
+    // Reset and use mockImplementation to route responses by SQL content
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) {
+        return Promise.resolve({ rows: [thought] });
+      }
+      if (sql.includes("COUNT(*)")) {
+        return Promise.resolve({ rows: [{ count: 0 }] });
+      }
+      if (sql.includes("open_loops") && sql.includes("ORDER BY")) {
+        return Promise.resolve({ rows: [loopRow] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({ query: "design review" });
+
+    expect(result.candidates.length).toBe(2);
+    // Loop has higher similarity so should be first after sort
+    expect(result.candidates[0].memory_type).toBe("loop");
+    expect(result.candidates[0].id).toBe("loop-1");
+    expect(result.candidates[1].memory_type).toBe("thought");
+  });
+});
+
+describe("searchMemory — entity-filtered loop retrieval", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("constrains loop query by entity_mentions when entityIds provided", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "waiting on from Liz",
+      memoryTypes: ["loops"],
+      entityIds: ["entity-liz-123"],
+    });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).toContain("entity_mentions");
+    // entityIds passed as array parameter
+    expect(loopCall![1]).toEqual(expect.arrayContaining([["entity-liz-123"]]))
+  });
+
+  it("does not add entity filter when entityIds is empty", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "test",
+      memoryTypes: ["loops"],
+      entityIds: [],
+    });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).not.toContain("entity_mentions");
+  });
+
+  it("does not add entity filter when entityIds is undefined", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({ query: "test", memoryTypes: ["loops"] });
+
+    const loopCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY"),
+    );
+    expect(loopCall).toBeDefined();
+    expect(loopCall![0]).not.toContain("entity_mentions");
+  });
+});
+
+describe("searchMemory — status-query loop injection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("injects direct actionable loops when preferOpenLoops is true", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("open_loops") && sql.includes("ORDER BY embedding")) {
+        return Promise.resolve({ rows: [] }); // vector search returns nothing
+      }
+      if (sql.includes("open_loops") && sql.includes("ORDER BY created_at")) {
+        // Direct fetch returns actionable loops
+        return Promise.resolve({
+          rows: [
+            { id: "loop-1", content: "Add reminders", loop_type: "task", status: "open", source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z" },
+            { id: "loop-2", content: "Follow up with Liz", loop_type: "task", status: "open", source_thought_id: "t2", created_at: "2026-03-19T00:00:00Z" },
+          ],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what tasks are open",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+    });
+
+    const loops = result.candidates.filter((c) => c.memory_type === "loop");
+    expect(loops.length).toBe(2);
+    expect(loops[0].content).toBe("Add reminders");
+    expect(loops[1].content).toBe("Follow up with Liz");
+  });
+
+  it("does not inject direct loops when preferOpenLoops is false", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "test",
+      memoryTypes: ["loops"],
+      preferOpenLoops: false,
+    });
+
+    // Should NOT have a direct fetch query (ORDER BY created_at)
+    const directCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY created_at"),
+    );
+    expect(directCall).toBeUndefined();
+  });
+
+  it("deduplicates injected loops against vector results", async () => {
+    const loopRow = {
+      id: "loop-1", content: "Add reminders", loop_type: "task", status: "open",
+      source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z",
+      similarity: 0.5, embedding_model: "openai/text-embedding-3-small",
+    };
+
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("open_loops") && sql.includes("ORDER BY embedding")) {
+        return Promise.resolve({ rows: [loopRow] }); // vector returns loop-1
+      }
+      if (sql.includes("open_loops") && sql.includes("ORDER BY created_at")) {
+        // Direct fetch also returns loop-1
+        return Promise.resolve({
+          rows: [{ id: "loop-1", content: "Add reminders", loop_type: "task", status: "open", source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z" }],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "tasks",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+    });
+
+    const loops = result.candidates.filter((c) => c.memory_type === "loop");
+    expect(loops.length).toBe(1); // deduplicated, not 2
+    expect(loops[0].score).toBe(0.5); // keeps the vector score, not the injected 0.3
+  });
+
+  it("applies entity filter to injected loops when entityIds provided", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "waiting on from Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const directCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("open_loops") && call[0].includes("ORDER BY created_at"),
+    );
+    expect(directCall).toBeDefined();
+    expect(directCall![0]).toContain("entity_mentions");
+    expect(directCall![1]).toEqual(expect.arrayContaining([["entity-liz"]]));
+  });
+});
+
+describe("searchMemory — lexical fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGenerateEmbedding.mockResolvedValue(new Array(1536).fill(0));
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("triggers lexical fallback when semantic results are sparse", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) {
+        return Promise.resolve({ rows: [] }); // no semantic results
+      }
+      if (sql.includes("ILIKE")) {
+        return Promise.resolve({
+          rows: [
+            { id: "t-lex-1", content: "Meeting about database migration strategy", metadata: { type: "note" }, created_at: "2026-03-18T00:00:00Z", parent_id: null },
+          ],
+        });
+      }
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "database migration",
+      memoryTypes: ["thoughts"],
+    });
+
+    const thoughts = result.candidates.filter((c) => c.memory_type === "thought");
+    expect(thoughts.length).toBe(1);
+    expect(thoughts[0].content).toContain("database migration");
+    expect(thoughts[0].metadata._lexical_fallback).toBe(true);
+  });
+
+  it("does not trigger lexical fallback when semantic results are sufficient", async () => {
+    const thoughts = [
+      makeThought({ id: "t1", similarity: 0.8 }),
+      makeThought({ id: "t2", similarity: 0.7 }),
+      makeThought({ id: "t3", similarity: 0.6 }),
+      makeThought({ id: "t4", similarity: 0.5 }),
+    ];
+
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) return Promise.resolve({ rows: thoughts });
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({ query: "test query" });
+
+    // Should NOT have an ILIKE query
+    const lexicalCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("ILIKE"),
+    );
+    expect(lexicalCall).toBeUndefined();
+  });
+
+  it("lexical fallback scores lower than vector results", async () => {
+    const vectorThought = makeThought({ id: "t-vec", similarity: 0.5 });
+
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) return Promise.resolve({ rows: [vectorThought] });
+      if (sql.includes("ILIKE")) {
+        return Promise.resolve({
+          rows: [{ id: "t-lex", content: "Lexical match on migration", metadata: { type: "note" }, created_at: "2026-03-18T00:00:00Z", parent_id: null }],
+        });
+      }
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({ query: "migration" });
+
+    const vec = result.candidates.find((c) => c.id === "t-vec");
+    const lex = result.candidates.find((c) => c.id === "t-lex");
+    expect(vec).toBeDefined();
+    expect(lex).toBeDefined();
+    expect(vec!.score).toBeGreaterThan(lex!.score);
+  });
+
+  it("deduplicates lexical results against vector results", async () => {
+    const thought = makeThought({ id: "t1", similarity: 0.8, content: "Database migration plan" });
+
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("match_thoughts")) return Promise.resolve({ rows: [thought] });
+      if (sql.includes("ILIKE")) {
+        // Same thought returned by lexical search
+        return Promise.resolve({
+          rows: [{ id: "t1", content: "Database migration plan", metadata: { type: "note" }, created_at: "2026-03-18T00:00:00Z", parent_id: null }],
+        });
+      }
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({ query: "database migration" });
+
+    const t1s = result.candidates.filter((c) => c.id === "t1");
+    expect(t1s.length).toBe(1); // not duplicated
+  });
+
+  it("strips stopwords and short words from lexical query", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("ILIKE")) {
+        // Check what terms were passed
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      return Promise.resolve({ rows: [] });
+    });
+
+    await searchMemory({
+      query: "what did the database migration look like",
+      memoryTypes: ["thoughts"],
+    });
+
+    const lexicalCall = mockQuery.mock.calls.find((call: any) =>
+      typeof call[0] === "string" && call[0].includes("ILIKE"),
+    );
+    if (lexicalCall) {
+      const params = lexicalCall[1] as string[];
+      // Should not contain "what", "did", "the" (stopwords) or "to" (short)
+      for (const p of params.slice(0, -1)) { // last param is limit
+        expect(p).not.toContain("%what%");
+        expect(p).not.toContain("%did%");
+        expect(p).not.toContain("%the%");
+      }
+    }
   });
 });
 

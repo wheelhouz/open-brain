@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect, useCallback } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
-import { api, type ChatMessage, type SourceThought, type Thought } from "../api";
-import { selectedThoughtId, showToast } from "../state";
+import { api, type ChatMessage, type SourceThought, type SourceLoop, type Thought } from "../api";
+import { selectedThoughtId, selectedLoopId, showToast } from "../state";
 import { MarkdownRenderer } from "../components/MarkdownRenderer";
 import { DetailPanel } from "../components/DetailPanel";
+import { LoopDetailPanel } from "../components/LoopDetailPanel";
 import { ThoughtCard } from "../components/ThoughtCard";
-import { Send, Brain, Sparkles, Bookmark, BookmarkCheck } from "lucide-preact";
+import { Send, Brain, Sparkles, Bookmark, BookmarkCheck, CircleDot } from "lucide-preact";
 
 interface ChatEntry {
   role: "user" | "assistant";
   content: string;
   sources?: SourceThought[];
+  loops?: SourceLoop[];
   thoughtContext?: Thought;
 }
 
@@ -47,6 +49,36 @@ function SourceChips({ sources }: { sources: SourceThought[] }) {
           >
             <span class="chat-source-text">{src.content}</span>
             <span class="chat-source-pct">{(src.similarity * 100).toFixed(0)}%</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const loopTypeLabels: Record<string, string> = {
+  task: "Task",
+  question: "Question",
+  decision: "Decision",
+  waiting_on: "Waiting on",
+};
+
+function LoopChips({ loops }: { loops: SourceLoop[] }) {
+  return (
+    <div class="chat-sources">
+      <span class="chat-sources-label">
+        <CircleDot class="w-3 h-3" />
+        {loops.length} loop{loops.length !== 1 ? "s" : ""}
+      </span>
+      <div class="chat-sources-scroll">
+        {loops.map((loop) => (
+          <button
+            key={loop.id}
+            onClick={() => { selectedLoopId.value = loop.id; }}
+            class="chat-loop-chip"
+          >
+            <span class="chat-source-text">{loop.content}</span>
+            <span class="chat-loop-type">{loopTypeLabels[loop.loop_type] || loop.loop_type}</span>
           </button>
         ))}
       </div>
@@ -131,11 +163,11 @@ export function ChatView(_props: RoutableProps) {
             return updated;
           });
         },
-        (sources) => {
+        (sources, loops) => {
           setEntries((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
-            updated[updated.length - 1] = { ...last, sources };
+            updated[updated.length - 1] = { ...last, sources, loops };
             return updated;
           });
         },
@@ -257,6 +289,9 @@ export function ChatView(_props: RoutableProps) {
                 {entry.sources && entry.sources.length > 0 && (
                   <SourceChips sources={entry.sources} />
                 )}
+                {entry.loops && entry.loops.length > 0 && (
+                  <LoopChips loops={entry.loops} />
+                )}
                 {parentThought && entry.content && !streaming && (
                   <div class="flex justify-end mt-1.5">
                     <button
@@ -312,6 +347,7 @@ export function ChatView(_props: RoutableProps) {
       </div>
 
       <DetailPanel />
+      <LoopDetailPanel />
     </div>
   );
 }

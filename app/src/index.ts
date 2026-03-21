@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { config } from "./config.js";
 import { app } from "./app.js";
 import { pool } from "./db.js";
+import { startEmbeddingWorker, scheduleBackfillSweep } from "./queue.js";
 
 async function initDb() {
   const sql = readFileSync("init.sql", "utf-8");
@@ -30,7 +31,9 @@ async function initDb() {
 }
 
 await initDb();
+startEmbeddingWorker();
 
 serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`Open Brain listening on :${info.port}`);
+  scheduleBackfillSweep();
 });

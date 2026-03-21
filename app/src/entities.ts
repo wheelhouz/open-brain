@@ -142,3 +142,144 @@ export async function resolveEntityMentions(
 
   return results;
 }
+
+export interface MentionRecord {
+  entity_id: string;
+  thought_id: string;
+  raw_mention_text: string;
+  normalized_mention_text: string;
+  resolution_state: ResolutionState;
+  resolution_confidence: number;
+  resolution_metadata_json: Record<string, unknown> | null;
+}
+
+/**
+ * Pure mention resolver for reprocess path — read-only, no writes.
+ * Skips unresolvable names (does NOT auto-create entities).
+ */
+export async function computeEntityMentions(
+  names: string[],
+  thoughtId: string,
+): Promise<MentionRecord[]> {
+  const results: MentionRecord[] = [];
+
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    const normalized = trimmed.toLowerCase();
+
+    // 1. Exact match
+    const exact = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
+      [trimmed],
+    );
+    if (exact.rows.length > 0) {
+      results.push({
+        entity_id: exact.rows[0].id, thought_id: thoughtId,
+        raw_mention_text: trimmed, normalized_mention_text: normalized,
+        resolution_state: "auto_linked_exact", resolution_confidence: 1.0,
+        resolution_metadata_json: { match_type: "canonical" },
+      });
+      continue;
+    }
+
+    // 2. Alias match
+    const alias = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE $1 ILIKE ANY(aliases) AND entity_type = 'person' LIMIT 1`,
+      [trimmed],
+    );
+    if (alias.rows.length > 0) {
+      results.push({
+        entity_id: alias.rows[0].id, thought_id: thoughtId,
+        raw_mention_text: trimmed, normalized_mention_text: normalized,
+        resolution_state: "auto_linked_alias", resolution_confidence: 1.0,
+        resolution_metadata_json: { match_type: "alias" },
+      });
+      continue;
+    }
+
+    // 3. Fuzzy match
+    const fuzzy = await query<{ id: string; sim: number }>(
+      `SELECT id,
+              greatest(
+                similarity(lower(canonical_name), lower($1)),
+                coalesce((SELECT max(similarity(lower(a), lower($1))) FROM unnest(aliases) a), 0)
+              ) AS sim
+       FROM entities WHERE entity_type = 'person'
+         AND (lower(canonical_name) % lower($1) OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) % lower($1)))
+       ORDER BY sim DESC LIMIT 1`,
+      [trimmed],
+    );
+    if (fuzzy.rows.length > 0 && fuzzy.rows[0].sim >= config.entityFuzzyThreshold) {
+      results.push({
+        entity_id: fuzzy.rows[0].id, thought_id: thoughtId,
+        raw_mention_text: trimmed, normalized_mention_text: normalized,
+        resolution_state: "auto_linked_fuzzy", resolution_confidence: fuzzy.rows[0].sim,
+        resolution_metadata_json: { match_type: "fuzzy", similarity: fuzzy.rows[0].sim },
+      });
+      continue;
+    }
+
+    // Unresolvable — skip (no auto-create)
+  }
+
+  return results;
+}
+
+/**
+ * Query-time entity resolver — read-only, no side effects.
+ * Person-only for v1. Returns null for unresolvable names.
+ */
+export async function resolveEntityCandidates(
+  names: string[],
+): Promise<Array<{ name: string; entity_id: string | null }>> {
+  const results: Array<{ name: string; entity_id: string | null }> = [];
+
+  for (const name of names) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+
+    // 1. Exact match
+    const exact = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
+      [trimmed],
+    );
+    if (exact.rows.length > 0) {
+      results.push({ name: trimmed, entity_id: exact.rows[0].id });
+      continue;
+    }
+
+    // 2. Alias match
+    const alias = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE $1 ILIKE ANY(aliases) AND entity_type = 'person' LIMIT 1`,
+      [trimmed],
+    );
+    if (alias.rows.length > 0) {
+      results.push({ name: trimmed, entity_id: alias.rows[0].id });
+      continue;
+    }
+
+    // 3. Fuzzy match
+    const fuzzy = await query<{ id: string; sim: number }>(
+      `SELECT id,
+              greatest(
+                similarity(lower(canonical_name), lower($1)),
+                coalesce((SELECT max(similarity(lower(a), lower($1))) FROM unnest(aliases) a), 0)
+              ) AS sim
+       FROM entities
+       WHERE entity_type = 'person'
+         AND (lower(canonical_name) % lower($1) OR EXISTS (SELECT 1 FROM unnest(aliases) a WHERE lower(a) % lower($1)))
+       ORDER BY sim DESC LIMIT 1`,
+      [trimmed],
+    );
+    if (fuzzy.rows.length > 0 && fuzzy.rows[0].sim >= config.entityFuzzyThreshold) {
+      results.push({ name: trimmed, entity_id: fuzzy.rows[0].id });
+      continue;
+    }
+
+    // Unresolvable
+    results.push({ name: trimmed, entity_id: null });
+  }
+
+  return results;
+}

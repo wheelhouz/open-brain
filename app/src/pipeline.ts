@@ -4,6 +4,7 @@ import { generateEmbedding, extractMetadata, assignCategory, type ThoughtMetadat
 import { resolveEntityMentions, type MentionResolution } from "./entities.js";
 import { processFactCandidates } from "./facts.js";
 import pgvector from "pgvector";
+import { config } from "./config.js";
 
 export async function createLoopsFromActionItems(
   actionItems: Array<{ content: string; loop_type: string } | string>,
@@ -12,15 +13,50 @@ export async function createLoopsFromActionItems(
   for (const item of actionItems) {
     const loopContent = typeof item === "string" ? item : item.content;
     const loopType = typeof item === "string" ? "task" : (item.loop_type || "task");
-    const loopResult = await query<{ id: string }>(
+
+    // 1. Idempotent insert
+    const insertResult = await query<{ id: string }>(
       `INSERT INTO open_loops (content, loop_type, source_thought_id)
-       VALUES ($1, $2, $3) RETURNING id`,
+       VALUES ($1, $2, $3)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
       [loopContent, loopType, thoughtId],
     );
+
+    // 2. Resolve effective loop_id (new or existing)
+    let loopId: string;
+    if (insertResult.rows.length > 0) {
+      loopId = insertResult.rows[0].id;
+    } else {
+      const existing = await query<{ id: string }>(
+        `SELECT id FROM open_loops WHERE md5(content) = md5($1) AND source_thought_id = $2`,
+        [loopContent, thoughtId],
+      );
+      loopId = existing.rows[0].id;
+    }
+
+    // 3. Always upsert evidence (repairs missing edges on rerun)
     await query(
       `INSERT INTO open_loop_evidence (loop_id, thought_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [loopResult.rows[0].id, thoughtId],
+      [loopId, thoughtId],
     );
+
+    // 4. Enqueue embedding only when loop is new or unembedded
+    const needsEmbedding = insertResult.rows.length > 0
+      || (await query(
+           `SELECT 1 FROM open_loops WHERE id = $1 AND embedding IS NULL`,
+           [loopId],
+         )).rows.length > 0;
+
+    if (needsEmbedding) {
+      try {
+        const { enqueueEmbeddingJob, triggerWorker } = await import("./queue.js");
+        await enqueueEmbeddingJob(loopId, config.embeddingModel);
+        triggerWorker();
+      } catch {
+        // Don't fail loop creation if embedding enqueue fails
+      }
+    }
   }
 }
 
@@ -59,10 +95,10 @@ export async function capturePipeline(
   const metadataWithHash = { ...metadataForStorage, content_hash: contentHash };
 
   const result = await query<{ id: string; created_at: string }>(
-    `INSERT INTO thoughts (content, embedding, metadata, parent_id)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO thoughts (content, embedding, metadata, parent_id, embedding_model, embedded_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING id, created_at`,
-    [content, pgvector.toSql(embedding), JSON.stringify(metadataWithHash), parentId || null],
+    [content, pgvector.toSql(embedding), JSON.stringify(metadataWithHash), parentId || null, config.embeddingModel, new Date().toISOString()],
   );
 
   // Auto-categorize new topics (best-effort, don't block capture)

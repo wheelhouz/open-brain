@@ -192,6 +192,11 @@ export interface QueryRewrite {
   search_query: string;
   filter: Record<string, unknown>;
   time_hint: "recent" | "last_month" | "older" | null;
+  // Phase 5 extensions
+  memory_types?: ("thoughts" | "loops" | "facts" | "all")[];
+  prefer_open_loops?: boolean;
+  entity_candidate_names?: string[];
+  intent_type?: "informational" | "task" | "person-summary" | "status" | "follow-up" | "decision";
 }
 
 const REWRITE_PROMPT = `You rewrite conversational queries into standalone search queries for a personal knowledge base.
@@ -200,13 +205,21 @@ Given the recent conversation, produce JSON:
 {
   "search_query": "standalone query capturing what the user wants, with conversation context resolved",
   "filter": {},
-  "time_hint": null
+  "time_hint": null,
+  "memory_types": ["all"],
+  "prefer_open_loops": false,
+  "entity_candidate_names": [],
+  "intent_type": "informational"
 }
 
 Rules:
 - "filter" supports "topics": [...] and "people": [...]. Extract names into "people" whenever a person's name appears in the query (e.g. "What did Liz say?" → "people": ["Liz"]). Extract subject keywords into "topics" when the user asks about a specific subject (e.g. "thoughts on architecture" → "topics": ["architecture"]). Leave empty only when no names or clear subjects are present.
 - "time_hint" is "recent", "last_month", "older", or null. Only set if user clearly references time.
-- "search_query" must be self-contained — do not use pronouns referring to earlier messages.`;
+- "search_query" must be self-contained — do not use pronouns referring to earlier messages.
+- "memory_types": array of types to search. Default ["all"]. Use ["loops"] for action/task/status queries, ["thoughts"] for informational/decision queries.
+- "prefer_open_loops": true ONLY when the user asks about pending actions, open tasks, to-dos, follow-ups, reminders, or what they are waiting on. Do NOT set true for decision-history queries like "what did we decide", "why did we choose", "what was the decision/plan/strategy" — those are informational lookups, not open-task queries.
+- "entity_candidate_names": extract person names mentioned. E.g. "What about Liz?" → ["Liz"].
+- "intent_type": one of "informational", "task", "person-summary", "status", "follow-up", "decision". Use "decision" for past decision lookups ("what did we decide"), not for open decision tasks.`;
 
 export async function rewriteQuery(
   messages: Array<{ role: string; content: string }>,
@@ -217,6 +230,10 @@ export async function rewriteQuery(
     search_query: lastUserMsg?.content || "",
     filter: {},
     time_hint: null,
+    memory_types: ["all"],
+    prefer_open_loops: false,
+    entity_candidate_names: [],
+    intent_type: "informational",
   };
 
   try {
@@ -231,10 +248,15 @@ export async function rewriteQuery(
     })) as { choices: Array<{ message: { content: string } }> };
 
     const raw = JSON.parse(data.choices[0].message.content);
+    const validIntentTypes = ["informational", "task", "person-summary", "status", "follow-up", "decision"];
     return {
       search_query: raw.search_query || fallback.search_query,
       filter: raw.filter && typeof raw.filter === "object" ? raw.filter : {},
       time_hint: ["recent", "last_month", "older"].includes(raw.time_hint) ? raw.time_hint : null,
+      memory_types: Array.isArray(raw.memory_types) ? raw.memory_types : ["all"],
+      prefer_open_loops: raw.prefer_open_loops === true,
+      entity_candidate_names: Array.isArray(raw.entity_candidate_names) ? raw.entity_candidate_names : [],
+      intent_type: validIntentTypes.includes(raw.intent_type) ? raw.intent_type : "informational",
     };
   } catch {
     return fallback;
