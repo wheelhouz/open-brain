@@ -6,7 +6,7 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThoughtCard } from "./ThoughtCard";
 import { BottomSheet } from "./BottomSheet";
 import { typeColor, typeLabel, relativeTime } from "../lib/format";
-import { Trash2, FileText, Code, Pencil, ChevronsLeft, ChevronsRight, Maximize2, Minimize2, MessageCircle, ExternalLink, ArrowLeft, Plus } from "lucide-preact";
+import { Trash2, FileText, Code, Pencil, ChevronsLeft, ChevronsRight, Maximize2, Minimize2, MessageCircle, ExternalLink, ArrowLeft, Plus, Copy, Check } from "lucide-preact";
 import { TopicEditor } from "./TopicEditor";
 
 function useMobileDetect() {
@@ -46,6 +46,7 @@ export function DetailPanel() {
   const [linkLoopOpen, setLinkLoopOpen] = useState(false);
   const [allLoops, setAllLoops] = useState<Loop[]>([]);
   const [loopFilter, setLoopFilter] = useState("");
+  const [copied, setCopied] = useState(false);
   const loopFilterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -66,6 +67,7 @@ export function DetailPanel() {
     setNoteContent("");
     setLinkLoopOpen(false);
     setLoopFilter("");
+    setCopied(false);
 
     Promise.all([
       api.thought(id),
@@ -123,6 +125,18 @@ export function DetailPanel() {
     setTimeout(() => editRef.current?.focus(), 50);
   };
 
+  const handleCopy = async () => {
+    if (!thought) return;
+    try {
+      await navigator.clipboard.writeText(thought.content);
+      setCopied(true);
+      showToast("Copied to clipboard");
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showToast("Failed to copy", "error");
+    }
+  };
+
   const cancelEdit = () => {
     setEditing(false);
     setEditContent("");
@@ -178,6 +192,10 @@ export function DetailPanel() {
       if (e.key === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setFullscreen((f) => !f);
+      }
+      if (e.key === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        handleCopy();
       }
       if (e.key === "q" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
@@ -309,6 +327,13 @@ export function DetailPanel() {
                 </div>
               ) : (
                 <div class="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={handleCopy}
+                    class="p-2.5 rounded-lg hover:bg-[var(--surface-hover)] active:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors"
+                    title="Copy content (c)"
+                  >
+                    {copied ? <Check class="w-[18px] h-[18px] text-green-500" /> : <Copy class="w-[18px] h-[18px]" />}
+                  </button>
                   <button
                     onClick={startEdit}
                     class="p-2.5 rounded-lg hover:bg-[var(--surface-hover)] active:bg-[var(--surface-hover)] text-[var(--text-muted)] transition-colors"
