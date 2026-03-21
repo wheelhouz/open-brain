@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { app } from "../app.js";
 
-const mockQuery = vi.fn();
+const { mockQuery, mockClientQuery, mockClient } = vi.hoisted(() => {
+  const mockQuery = vi.fn();
+  const mockClientQuery = vi.fn();
+  const mockClient = {
+    query: (...args: unknown[]) => mockClientQuery(...args),
+    release: vi.fn(),
+  };
+  return { mockQuery, mockClientQuery, mockClient };
+});
 
 vi.mock("../db.js", () => ({
-  pool: {},
+  pool: { connect: vi.fn().mockResolvedValue(mockClient) },
   query: (...args: unknown[]) => mockQuery(...args),
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
@@ -23,6 +31,11 @@ vi.mock("../openrouter.js", () => ({
 
 vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
+}));
+
+vi.mock("../entities.js", () => ({
+  resolveEntityMentions: vi.fn().mockResolvedValue([]),
+  computeEntityMentions: vi.fn().mockResolvedValue([]),
 }));
 
 const AUTH = { Authorization: `Bearer ${process.env.BRAIN_ACCESS_KEY}` };
@@ -212,5 +225,74 @@ describe("PATCH /api/thoughts/:id", () => {
       body: JSON.stringify({ content: "test" }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it("deletes open loops even when action_items is empty on reprocess", async () => {
+    const { extractMetadata } = await import("../openrouter.js");
+    (extractMetadata as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      type: "observation",
+      topics: [],
+      people: [],
+      action_items: [],
+      dates_mentioned: [],
+      source_context: null,
+    });
+
+    mockQuery.mockResolvedValue({
+      rows: [{
+        id: "uuid-1", content: "edited", metadata: { type: "observation", topics: [] },
+        created_at: "2026-03-04", updated_at: "2026-03-05",
+      }],
+    });
+    mockClientQuery.mockResolvedValue({ rows: [] });
+
+    const res = await app.request("/api/thoughts/uuid-1", {
+      method: "PATCH",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "edited", reprocess: true }),
+    });
+
+    expect(res.status).toBe(200);
+    // Verify DELETE of open loops was called
+    const deleteCalls = mockQuery.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("DELETE FROM open_loops"),
+    );
+    expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
+    expect(deleteCalls[0][0]).toContain("status = 'open'");
+    expect(deleteCalls[0][1]).toEqual(["uuid-1"]);
+  });
+
+  it("DELETE targets only status='open' loops on reprocess", async () => {
+    const { extractMetadata } = await import("../openrouter.js");
+    (extractMetadata as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      type: "task",
+      topics: ["work"],
+      people: [],
+      action_items: ["do something"],
+      dates_mentioned: [],
+      source_context: null,
+    });
+
+    mockQuery.mockResolvedValue({
+      rows: [{
+        id: "uuid-2", content: "task content", metadata: { type: "task", topics: ["work"] },
+        created_at: "2026-03-04", updated_at: "2026-03-05",
+      }],
+    });
+    mockClientQuery.mockResolvedValue({ rows: [] });
+
+    const res = await app.request("/api/thoughts/uuid-2", {
+      method: "PATCH",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "task content", reprocess: true }),
+    });
+
+    expect(res.status).toBe(200);
+    const deleteCalls = mockQuery.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("DELETE FROM open_loops"),
+    );
+    expect(deleteCalls.length).toBeGreaterThanOrEqual(1);
+    // Must scope to status='open' — never delete closed/snoozed
+    expect(deleteCalls[0][0]).toContain("status = 'open'");
   });
 });
