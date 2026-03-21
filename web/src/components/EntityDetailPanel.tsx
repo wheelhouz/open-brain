@@ -63,8 +63,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
     setFactKey(0);
 
     Promise.all([
-      api.entity(entityId),
-      api.entityThoughts(entityId),
+      api.entity(entityId!),
+      api.entityThoughts(entityId!),
     ]).then(([e, t]) => {
       setEntity(e);
       setThoughts(t.thoughts);

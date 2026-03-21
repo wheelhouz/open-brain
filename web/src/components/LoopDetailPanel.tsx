@@ -68,7 +68,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     setAddingNote(false);
     setNoteContent("");
 
-    api.loop(id).then((data) => {
+    api.loop(id!).then((data) => {
       setLoop(data);
       setLoading(false);
       contentRef.current?.scrollTo(0, 0);

@@ -76,10 +76,10 @@ export function DetailPanel() {
     setCopied(false);
 
     Promise.all([
-      api.thought(id),
-      api.related(id).catch(() => ({ related: [] })),
-      api.thread(id).catch(() => ({ thread: [] })),
-      api.loopsByThought(id).catch(() => ({ loops: [] })),
+      api.thought(id!),
+      api.related(id!).catch(() => ({ related: [] })),
+      api.thread(id!).catch(() => ({ thread: [] })),
+      api.loopsByThought(id!).catch(() => ({ loops: [] })),
     ]).then(([t, r, th, l]) => {
       setThought(t);
       setRelated(r.related);
