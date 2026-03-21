@@ -9,7 +9,6 @@ services:
     volumes:
       - brain-data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./db/init-dev.sql:/docker-entrypoint-initdb.d/02-init-dev.sql:ro
     networks:
       - brain-net
     ports:
