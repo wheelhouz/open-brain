@@ -138,12 +138,17 @@ chatRouter.post("/", async (c) => {
       }));
     } else {
       // Default / action-status broker path
+      const resolvedIds = resolvedEntities
+        .filter((e) => e.entity_id !== null)
+        .map((e) => e.entity_id as string);
+
       const memoryResult = await searchMemory({
         query: rewrite.search_query,
         filter: rewrite.filter,
         timeHint: rewrite.time_hint,
         memoryTypes: rewrite.memory_types,
         preferOpenLoops: rewrite.prefer_open_loops,
+        entityIds: resolvedIds.length > 0 ? resolvedIds : undefined,
       });
 
       // Split candidates by type

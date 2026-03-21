@@ -50,6 +50,7 @@ export interface SearchMemoryOptions {
   threshold?: number;
   memoryTypes?: ("thoughts" | "loops" | "facts" | "all")[];
   preferOpenLoops?: boolean;
+  entityIds?: string[];
 }
 
 export interface SearchMemoryResult {
@@ -422,6 +423,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
   // Loop retrieval
   if (shouldQuery("loops")) {
     const currentModel = config.embeddingModel;
+    const loopIds = new Set<string>();
 
     // Count model mismatches for diagnostics
     const mismatchResult = await query(
@@ -433,6 +435,15 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     );
     modelMismatchExclusions = mismatchResult.rows[0]?.count ?? 0;
 
+    // Fix 1: Entity-filtered loop retrieval
+    // When entity IDs are provided, constrain loops to those linked via entity_mentions
+    let entityFilter = "";
+    const loopParams: unknown[] = [embeddingSql, currentModel, limit];
+    if (options.entityIds && options.entityIds.length > 0) {
+      entityFilter = `AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($4))`;
+      loopParams.push(options.entityIds);
+    }
+
     const loopResult = await query(
       `SELECT id, content, loop_type, status, source_thought_id, created_at,
               1 - (embedding <=> $1) as similarity,
@@ -441,15 +452,15 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
        WHERE embedding IS NOT NULL
          AND embedding_model = $2
          AND (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))
+         ${entityFilter}
        ORDER BY embedding <=> $1
        LIMIT $3`,
-      [embeddingSql, currentModel, limit],
+      loopParams,
     );
-
-    loopCandidateCount = loopResult.rows.length;
 
     for (const r of loopResult.rows as any[]) {
       if (r.similarity >= threshold) {
+        loopIds.add(r.id);
         candidates.push({
           memory_type: "loop",
           id: r.id,
@@ -466,6 +477,48 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
         });
       }
     }
+
+    // Fix 2: Status-query loop injection
+    // When intent signals open tasks, supplement vector results with direct actionable-loop fetch
+    // Same pattern as recent-thought augmentation
+    if (options.preferOpenLoops) {
+      let directSql = `SELECT id, content, loop_type, status, source_thought_id, created_at
+         FROM open_loops
+         WHERE (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`;
+      const directParams: unknown[] = [];
+      let paramIdx = 1;
+
+      if (options.entityIds && options.entityIds.length > 0) {
+        directSql += ` AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($${paramIdx++}))`;
+        directParams.push(options.entityIds);
+      }
+
+      directSql += ` ORDER BY created_at DESC LIMIT $${paramIdx}`;
+      directParams.push(limit);
+
+      const directResult = await query(directSql, directParams);
+
+      for (const r of directResult.rows as any[]) {
+        if (!loopIds.has(r.id)) {
+          loopIds.add(r.id);
+          candidates.push({
+            memory_type: "loop",
+            id: r.id,
+            content: r.content,
+            source: "open_loops",
+            score: 0.3, // baseline score for injected loops
+            timestamp: r.created_at,
+            metadata: {
+              loop_type: r.loop_type,
+              status: r.status,
+              source_thought_id: r.source_thought_id,
+            },
+          });
+        }
+      }
+    }
+
+    loopCandidateCount = loopIds.size;
 
     if (modelMismatchExclusions > 0) {
       console.log(JSON.stringify({
