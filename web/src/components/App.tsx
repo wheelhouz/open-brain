@@ -13,6 +13,7 @@ import { ChatView } from "../views/ChatView";
 import { CaptureBar } from "./CaptureBar";
 import { SearchBar } from "./SearchBar";
 import { LoopsView } from "../views/LoopsView";
+import { PersonOverlay } from "./PersonOverlay";
 import { Brain, List, Hash, Users, BarChart3, MessageCircle, CircleDot } from "lucide-preact";
 
 const tabs = [
@@ -143,6 +144,9 @@ export function App() {
             <CaptureBar mobile />
           </div>
         )}
+
+        {/* Person overlay (global — opens from any person badge click) */}
+        <PersonOverlay />
 
         {/* Toasts */}
         <ToastContainer />

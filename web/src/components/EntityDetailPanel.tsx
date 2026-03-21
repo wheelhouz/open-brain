@@ -26,9 +26,10 @@ interface EntityDetailPanelProps {
   entityId: string | null;
   onClose: () => void;
   onEntityChanged?: () => void;
+  noScrim?: boolean;
 }
 
-export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: EntityDetailPanelProps) {
+export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim }: EntityDetailPanelProps) {
   const [entity, setEntity] = useState<Entity | null>(null);
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [loading, setLoading] = useState(false);
@@ -382,7 +383,7 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged }: Entity
         class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
         onClick={onClose}
       >
-        <div class="absolute inset-0 bg-black/40" />
+        {!noScrim && <div class="absolute inset-0 bg-black/40" />}
         <div
           ref={contentRef}
           class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
