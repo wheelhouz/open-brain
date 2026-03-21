@@ -500,7 +500,9 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
            SELECT DISTINCT ON (ol.id)
                   ol.id, ol.content, ol.loop_type, ol.status, ol.source_thought_id, ol.created_at
            FROM open_loops ol
-           JOIN entity_mentions em ON em.thought_id = ol.source_thought_id
+           JOIN entity_mentions em
+             ON em.thought_id = ol.source_thought_id
+             OR em.thought_id IN (SELECT thought_id FROM open_loop_evidence WHERE loop_id = ol.id)
            WHERE em.entity_id = ANY($1)
              AND (ol.status = 'open' OR (ol.status = 'snoozed' AND ol.snoozed_until <= now()))
            ORDER BY ol.id
@@ -527,10 +529,34 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
         }
       }
 
+      // Fetch best evidence thought similarity per loop
+      const structuralLoopIds = structuralLoops.map((l) => l.id);
+      const evidenceSimilarities = new Map<string, number>();
+
+      if (structuralLoopIds.length > 0) {
+        const evidenceResult = await query(
+          `SELECT ole.loop_id, MAX(1 - (t.embedding <=> $1)) as best_evidence_similarity
+           FROM open_loop_evidence ole
+           JOIN thoughts t ON t.id = ole.thought_id
+           WHERE ole.loop_id = ANY($2)
+             AND t.deleted_at IS NULL
+             AND t.embedding IS NOT NULL
+           GROUP BY ole.loop_id`,
+          [embeddingSql, structuralLoopIds],
+        );
+        for (const r of evidenceResult.rows as any[]) {
+          evidenceSimilarities.set(r.loop_id, r.best_evidence_similarity);
+        }
+      }
+
       for (const r of structuralLoops) {
         loopIds.add(r.id);
         const sourceThoughtSim = sourceThoughtSimilarities.get(r.source_thought_id) ?? null;
-        const baseScore = sourceThoughtSim !== null ? sourceThoughtSim : STRUCTURAL_DEFAULT_SCORE;
+        const evidenceSim = evidenceSimilarities.get(r.id) ?? null;
+        const bestSim = sourceThoughtSim !== null && evidenceSim !== null
+          ? Math.max(sourceThoughtSim, evidenceSim)
+          : sourceThoughtSim ?? evidenceSim;
+        const baseScore = bestSim !== null ? bestSim : STRUCTURAL_DEFAULT_SCORE;
         const score = baseScore + ENTITY_LINK_BOOST;
         loopScores.set(r.id, score);
 
@@ -557,7 +583,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     let entityFilter = "";
     const loopParams: unknown[] = [embeddingSql, currentModel, limit];
     if (hasEntityScope) {
-      entityFilter = `AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($4))`;
+      entityFilter = `AND (source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($4)) OR id IN (SELECT ole.loop_id FROM open_loop_evidence ole JOIN entity_mentions em ON em.thought_id = ole.thought_id WHERE em.entity_id = ANY($4)))`;
       loopParams.push(options.entityIds);
     }
 

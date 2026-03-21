@@ -89,8 +89,8 @@ chatRouter.post("/", async (c) => {
     }
 
     const resolvedEntityId = resolvedEntities.find(e => e.entity_id !== null)?.entity_id;
-    const isPersonSummary = rewrite.intent_type === "person-summary";
-    const hasLoopSignal = rewrite.intent_type === "task" || rewrite.intent_type === "status" || rewrite.intent_type === "follow-up" || rewrite.prefer_open_loops;
+    const isPersonSummary = rewrite.intent_type === "person-summary" || rewrite.intent_type === "person-recency";
+    const hasLoopSignal = rewrite.intent_type === "task" || rewrite.intent_type === "status" || rewrite.intent_type === "follow-up" || rewrite.intent_type === "person-recency" || rewrite.prefer_open_loops;
 
     if (resolvedEntityId && isPersonSummary && !hasLoopSignal) {
       // Person-summary only → entity-grounded path

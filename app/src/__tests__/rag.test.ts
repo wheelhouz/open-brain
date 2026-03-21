@@ -877,6 +877,112 @@ describe("searchMemory — provenance-based loop retrieval", () => {
     );
     expect(structuralCall).toBeDefined();
   });
+
+  it("loop found via evidence link (not source thought) for entity-scoped query", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      // Structural query — loop found via evidence link to entity
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        // Verify the SQL includes evidence join
+        expect(sql).toContain("open_loop_evidence");
+        return Promise.resolve({
+          rows: [
+            { id: "loop-evidence", content: "Research topic", loop_type: "task", status: "open", source_thought_id: "t-unrelated", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought has no entity mention match (low similarity)
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts") && !sql.includes("open_loop_evidence")) {
+        return Promise.resolve({ rows: [{ id: "t-unrelated", similarity: 0.3 }] });
+      }
+      // Evidence thought has better similarity
+      if (sql.includes("open_loop_evidence") && sql.includes("MAX")) {
+        return Promise.resolve({ rows: [{ loop_id: "loop-evidence", best_evidence_similarity: 0.85 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "what's open for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loop = result.candidates.find((c) => c.id === "loop-evidence");
+    expect(loop).toBeDefined();
+    expect(loop!.metadata._provenance).toBe(true);
+    // Should use evidence similarity (0.85) over source thought (0.3), plus entity boost
+    expect(loop!.score).toBeCloseTo(1.0, 1);
+  });
+
+  it("evidence thought similarity used when higher than source thought similarity", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      if (sql.includes("DISTINCT ON") && sql.includes("entity_mentions")) {
+        return Promise.resolve({
+          rows: [
+            { id: "loop-both", content: "Task", loop_type: "task", status: "open", source_thought_id: "t1", created_at: "2026-03-20T00:00:00Z" },
+          ],
+        });
+      }
+      // Source thought: moderate similarity
+      if (sql.includes("1 - (embedding <=>") && sql.includes("thoughts") && !sql.includes("open_loop_evidence")) {
+        return Promise.resolve({ rows: [{ id: "t1", similarity: 0.5 }] });
+      }
+      // Evidence: higher similarity
+      if (sql.includes("open_loop_evidence") && sql.includes("MAX")) {
+        return Promise.resolve({ rows: [{ loop_id: "loop-both", best_evidence_similarity: 0.9 }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "check status for Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: true,
+      entityIds: ["entity-liz"],
+    });
+
+    const loop = result.candidates.find((c) => c.id === "loop-both");
+    expect(loop).toBeDefined();
+    // max(0.5, 0.9) + 0.15 = 1.05
+    expect(loop!.score).toBeCloseTo(1.05, 1);
+  });
+
+  it("semantic path finds loop via evidence entity mention", async () => {
+    mockQuery.mockReset();
+    mockQuery.mockImplementation((sql: string) => {
+      if (sql.includes("COUNT(*)")) return Promise.resolve({ rows: [{ count: 0 }] });
+      // No structural results (not an action query in this test)
+      if (sql.includes("DISTINCT ON")) return Promise.resolve({ rows: [] });
+      // Semantic query — verify entity filter includes evidence path
+      if (sql.includes("open_loops") && sql.includes("ORDER BY embedding")) {
+        expect(sql).toContain("open_loop_evidence");
+        return Promise.resolve({
+          rows: [{
+            id: "loop-via-evidence", content: "Check in", loop_type: "task", status: "open",
+            source_thought_id: "t-other", created_at: "2026-03-20T00:00:00Z",
+            similarity: 0.75, embedding_model: "openai/text-embedding-3-small",
+          }],
+        });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await searchMemory({
+      query: "things about Liz",
+      memoryTypes: ["loops"],
+      preferOpenLoops: false, // not action query — only semantic path fires
+      entityIds: ["entity-liz"],
+    });
+
+    const loop = result.candidates.find((c) => c.id === "loop-via-evidence");
+    expect(loop).toBeDefined();
+    expect(loop!.score).toBeCloseTo(0.75, 1);
+  });
 });
 
 describe("formatContext", () => {
