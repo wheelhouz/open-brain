@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveEntityMentions } from "../entities.js";
+import { resolveEntityMentions, computeEntityMentions } from "../entities.js";
 
 const mockQuery = vi.fn();
 
@@ -230,5 +230,90 @@ describe("resolveEntityMentions", () => {
         resolution_metadata: null,
       }),
     );
+  });
+});
+
+describe("computeEntityMentions", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("returns MentionRecords without writing to the database", async () => {
+    // Exact match — only 1 query, no INSERT
+    mockQuery.mockResolvedValueOnce({ rows: [{ id: "entity-1" }] });
+
+    const result = await computeEntityMentions(["Alice"], "thought-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
+      entity_id: "entity-1",
+      thought_id: "thought-1",
+      raw_mention_text: "Alice",
+      normalized_mention_text: "alice",
+      resolution_state: "auto_linked_exact",
+      resolution_confidence: 1.0,
+      resolution_metadata_json: { match_type: "canonical" },
+    });
+    // Only 1 SELECT query — no INSERT, no UPDATE
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    for (const call of mockQuery.mock.calls) {
+      expect(call[0]).not.toContain("INSERT");
+      expect(call[0]).not.toContain("UPDATE");
+    }
+  });
+
+  it("skips unresolvable names without creating entities", async () => {
+    // No exact match
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    // No alias match
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    // No fuzzy match
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+
+    const result = await computeEntityMentions(["UnknownPerson"], "thought-1");
+
+    expect(result).toHaveLength(0);
+    // 3 SELECT queries — no INSERT
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+    for (const call of mockQuery.mock.calls) {
+      expect(call[0]).not.toContain("INSERT");
+    }
+  });
+
+  it("skips empty and whitespace-only names", async () => {
+    const result = await computeEntityMentions(["", "  "], "thought-1");
+
+    expect(result).toHaveLength(0);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("resolves via alias match without writing", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] }) // no exact
+      .mockResolvedValueOnce({ rows: [{ id: "entity-2" }] }); // alias hit
+
+    const result = await computeEntityMentions(["Al"], "thought-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].resolution_state).toBe("auto_linked_alias");
+    expect(result[0].entity_id).toBe("entity-2");
+    // 2 SELECT queries — no writes
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves via fuzzy match without appending alias", async () => {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] }) // no exact
+      .mockResolvedValueOnce({ rows: [] }) // no alias
+      .mockResolvedValueOnce({ rows: [{ id: "entity-3", sim: 0.6 }] }); // fuzzy hit
+
+    const result = await computeEntityMentions(["Bobby"], "thought-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].resolution_state).toBe("auto_linked_fuzzy");
+    expect(result[0].resolution_confidence).toBe(0.6);
+    // 3 SELECT queries — no alias append UPDATE
+    expect(mockQuery).toHaveBeenCalledTimes(3);
+    for (const call of mockQuery.mock.calls) {
+      expect(call[0]).not.toContain("array_append");
+    }
   });
 });
