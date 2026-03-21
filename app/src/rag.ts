@@ -507,6 +507,7 @@ export function formatContext(thoughts: RetrievedThought[]): string {
       const type = (t.metadata?.type as string) || "note";
       const similarity = (t.similarity * 100).toFixed(0);
       const topics = Array.isArray(t.metadata?.topics) ? (t.metadata.topics as string[]).join(", ") : "";
+      // people from cached metadata — display convenience, not source of truth (entity_mentions is authoritative)
       const people = Array.isArray(t.metadata?.people) ? (t.metadata.people as string[]).join(", ") : "";
 
       let header = `[Thought ${i + 1}] (relevance: ${similarity}%, ${date}, ${type})`;

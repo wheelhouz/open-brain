@@ -31,8 +31,9 @@ describe("GET /review", () => {
     expect(body.themes).toEqual([]);
   });
 
-  it("returns structured review with themes and action items", async () => {
-    mockQuery.mockResolvedValue({
+  it("returns structured review using open_loops and entities", async () => {
+    // Call 1: thoughts query
+    mockQuery.mockResolvedValueOnce({
       rows: [
         {
           id: "1",
@@ -40,8 +41,6 @@ describe("GET /review", () => {
           metadata: {
             type: "meeting_note",
             topics: ["api"],
-            people: ["Sarah"],
-            action_items: ["Rewrite API"],
           },
           created_at: new Date().toISOString(),
         },
@@ -51,11 +50,29 @@ describe("GET /review", () => {
           metadata: {
             type: "idea",
             topics: ["api", "performance"],
-            people: [],
-            action_items: [],
           },
           created_at: new Date().toISOString(),
         },
+      ],
+    });
+
+    // Call 2: open_loops query
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "loop-1",
+          content: "Rewrite API",
+          loop_type: "task",
+          source_thought_id: "1",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+
+    // Call 3: entities/people query
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        { canonical_name: "Sarah", mention_count: 3 },
       ],
     });
 
@@ -67,7 +84,18 @@ describe("GET /review", () => {
     expect(body.total_thoughts).toBe(2);
     expect(body.open_action_items).toHaveLength(1);
     expect(body.open_action_items[0].item).toBe("Rewrite API");
+    expect(body.open_action_items[0].loop_type).toBe("task");
     expect(body.top_people[0].name).toBe("Sarah");
+    expect(body.top_people[0].mentions).toBe(3);
     expect(body.themes.length).toBeGreaterThan(0);
+
+    // Verify open_loops query was made
+    const loopsSql = mockQuery.mock.calls[1][0] as string;
+    expect(loopsSql).toContain("open_loops");
+
+    // Verify entities query was made
+    const peopleSql = mockQuery.mock.calls[2][0] as string;
+    expect(peopleSql).toContain("entities");
+    expect(peopleSql).toContain("entity_mentions");
   });
 });

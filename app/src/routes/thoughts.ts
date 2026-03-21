@@ -32,8 +32,19 @@ thoughtsRouter.get("/", async (c) => {
     params.push(topic);
   }
   if (person) {
-    conditions.push(`metadata->'people' ? $${paramIdx++}`);
-    params.push(person);
+    // Try entity-backed resolution first
+    const entityResult = await query<{ id: string }>(
+      `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
+      [person],
+    );
+    if (entityResult.rows.length > 0) {
+      conditions.push(`id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = $${paramIdx++})`);
+      params.push(entityResult.rows[0].id);
+    } else {
+      // Fallback to metadata for unresolved names
+      conditions.push(`metadata->'people' ? $${paramIdx++}`);
+      params.push(person);
+    }
   }
   if (days) {
     conditions.push(`created_at > now() - interval '1 day' * $${paramIdx++}`);

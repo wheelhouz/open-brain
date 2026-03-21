@@ -14,8 +14,6 @@ reviewRouter.get("/", async (c) => {
     metadata: {
       type?: string;
       topics?: string[];
-      people?: string[];
-      action_items?: string[];
     };
     created_at: string;
   }>(
@@ -38,23 +36,38 @@ reviewRouter.get("/", async (c) => {
     });
   }
 
-  // Collect action items
-  const actionItems: Array<{ item: string; from_thought: string; created_at: string }> = [];
-  const peopleCounts: Record<string, number> = {};
-  const topicCounts: Record<string, number> = {};
+  // Task 30: Get action items from open_loops instead of metadata
+  const loopsResult = await query<{
+    id: string;
+    content: string;
+    loop_type: string;
+    source_thought_id: string;
+    created_at: string;
+  }>(
+    `SELECT id, content, loop_type, source_thought_id, created_at
+     FROM open_loops
+     WHERE status = 'open'
+       AND created_at > now() - interval '1 day' * $1
+     ORDER BY created_at DESC`,
+    [days],
+  );
 
+  // Task 30: Get people from entities instead of metadata
+  const peopleResult = await query<{ canonical_name: string; mention_count: number }>(
+    `SELECT e.canonical_name, count(em.thought_id)::int as mention_count
+     FROM entities e
+     JOIN entity_mentions em ON em.entity_id = e.id
+     JOIN thoughts t ON t.id = em.thought_id AND t.deleted_at IS NULL
+     WHERE e.entity_type = 'person' AND t.created_at > now() - interval '1 day' * $1
+     GROUP BY e.canonical_name
+     ORDER BY mention_count DESC`,
+    [days],
+  );
+
+  // Collect topics from thought metadata (still metadata-based — topics aren't entities)
+  const topicCounts: Record<string, number> = {};
   for (const t of result.rows) {
     const meta = t.metadata;
-    if (meta.action_items) {
-      for (const item of meta.action_items) {
-        actionItems.push({ item, from_thought: t.id, created_at: t.created_at });
-      }
-    }
-    if (meta.people) {
-      for (const p of meta.people) {
-        peopleCounts[p] = (peopleCounts[p] || 0) + 1;
-      }
-    }
     if (meta.topics) {
       for (const tp of meta.topics) {
         topicCounts[tp] = (topicCounts[tp] || 0) + 1;
@@ -87,10 +100,17 @@ reviewRouter.get("/", async (c) => {
       }),
   );
 
-  const topPeople = Object.entries(peopleCounts)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 20)
-    .map(([name, mentions]) => ({ name, mentions }));
+  const actionItems = loopsResult.rows.map((l) => ({
+    item: l.content,
+    loop_type: l.loop_type,
+    from_thought: l.source_thought_id,
+    created_at: l.created_at,
+  }));
+
+  const topPeople = peopleResult.rows.map((r) => ({
+    name: r.canonical_name,
+    mentions: r.mention_count,
+  }));
 
   // Generate suggested focus areas
   const focusPrompt = `Based on these action items and themes, suggest 2-3 focus areas for the coming week. Be concise, one line each.
@@ -115,6 +135,7 @@ Top people: ${topPeople.map((p) => `${p.name} (${p.mentions})`).join(", ")}`;
     themes,
     open_action_items: actionItems.map((a) => ({
       item: a.item,
+      loop_type: a.loop_type,
       from_thought: a.from_thought,
       age_days: Math.floor(
         (Date.now() - new Date(a.created_at).getTime()) / (1000 * 60 * 60 * 24),

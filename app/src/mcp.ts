@@ -117,8 +117,19 @@ export function createMcpServer(): McpServer {
         params.push(topic);
       }
       if (person) {
-        conditions.push(`metadata->'people' ? $${idx++}`);
-        params.push(person);
+        // Try entity-backed resolution first
+        const entityResult = await query<{ id: string }>(
+          `SELECT id FROM entities WHERE lower(canonical_name) = lower($1) AND entity_type = 'person' LIMIT 1`,
+          [person],
+        );
+        if (entityResult.rows.length > 0) {
+          conditions.push(`id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = $${idx++})`);
+          params.push(entityResult.rows[0].id);
+        } else {
+          // Fallback to metadata for unresolved names
+          conditions.push(`metadata->'people' ? $${idx++}`);
+          params.push(person);
+        }
       }
       if (days) {
         conditions.push(`created_at > now() - interval '1 day' * $${idx++}`);
@@ -161,9 +172,13 @@ export function createMcpServer(): McpServer {
            WHERE deleted_at IS NULL GROUP BY topic ORDER BY count DESC LIMIT 20`,
         ),
         query<{ person: string; count: string }>(
-          `SELECT person, count(*) as count
-           FROM thoughts, jsonb_array_elements_text(metadata->'people') as person
-           WHERE deleted_at IS NULL GROUP BY person ORDER BY count DESC LIMIT 20`,
+          `SELECT e.canonical_name as person, count(DISTINCT em.thought_id)::int as count
+           FROM entities e
+           JOIN entity_mentions em ON em.entity_id = e.id
+           JOIN thoughts t ON t.id = em.thought_id AND t.deleted_at IS NULL
+           WHERE e.entity_type = 'person'
+           GROUP BY e.canonical_name
+           ORDER BY count DESC LIMIT 20`,
         ),
       ]);
 
@@ -262,37 +277,60 @@ export function createMcpServer(): McpServer {
       days: z.number().default(7).describe("Number of days to review"),
     },
     async ({ days }) => {
-      const result = await query<{
-        id: string;
-        content: string;
-        metadata: {
-          type?: string;
-          topics?: string[];
-          people?: string[];
-          action_items?: string[];
-        };
-        created_at: string;
-      }>(
-        `SELECT id, content, metadata, created_at
-         FROM thoughts
-         WHERE deleted_at IS NULL AND created_at > now() - interval '1 day' * $1
-         ORDER BY created_at DESC`,
-        [days],
-      );
+      const [thoughtsResult, loopsResult, peopleResult] = await Promise.all([
+        query<{
+          id: string;
+          content: string;
+          metadata: { type?: string; topics?: string[] };
+          created_at: string;
+        }>(
+          `SELECT id, content, metadata, created_at
+           FROM thoughts
+           WHERE deleted_at IS NULL AND created_at > now() - interval '1 day' * $1
+           ORDER BY created_at DESC`,
+          [days],
+        ),
+        query<{ content: string; loop_type: string; created_at: string }>(
+          `SELECT content, loop_type, created_at
+           FROM open_loops
+           WHERE status = 'open'
+             AND created_at > now() - interval '1 day' * $1
+           ORDER BY created_at DESC`,
+          [days],
+        ),
+        query<{ canonical_name: string; mention_count: number }>(
+          `SELECT e.canonical_name, count(em.thought_id)::int as mention_count
+           FROM entities e
+           JOIN entity_mentions em ON em.entity_id = e.id
+           JOIN thoughts t ON t.id = em.thought_id AND t.deleted_at IS NULL
+           WHERE e.entity_type = 'person' AND t.created_at > now() - interval '1 day' * $1
+           GROUP BY e.canonical_name
+           ORDER BY mention_count DESC`,
+          [days],
+        ),
+      ]);
 
-      if (result.rows.length === 0) {
+      if (thoughtsResult.rows.length === 0) {
         return {
           content: [{ type: "text" as const, text: "No thoughts captured in this period." }],
         };
       }
 
-      const thoughtsSummary = result.rows
+      const thoughtsSummary = thoughtsResult.rows
         .map((t) => `- [${t.metadata.type || "unknown"}] ${t.content.slice(0, 200)}`)
         .join("\n");
 
+      const loopsSummary = loopsResult.rows.length > 0
+        ? `\n\nOpen action items:\n${loopsResult.rows.map((l) => `- [${l.loop_type}] ${l.content}`).join("\n")}`
+        : "";
+
+      const peopleSummary = peopleResult.rows.length > 0
+        ? `\n\nMost mentioned people:\n${peopleResult.rows.map((p) => `- ${p.canonical_name} (${p.mention_count} mentions)`).join("\n")}`
+        : "";
+
       const review = await chatCompletion(
         `You are a personal knowledge assistant. Analyze the following thoughts captured over the last ${days} days and provide a structured weekly review with: 1) Key themes, 2) Open action items, 3) Most mentioned people, 4) Suggested focus areas for next week.`,
-        thoughtsSummary,
+        thoughtsSummary + loopsSummary + peopleSummary,
       );
 
       return {
