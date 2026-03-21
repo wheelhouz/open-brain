@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "preact/hooks";
 import { route } from "preact-router";
-import { selectedThoughtId, selectedLoopId, selectedEntityName, lastDeletedId, showToast } from "../state";
+import { selectedThoughtId, selectedLoopId, selectedEntityName, lastDeletedId, showToast, nextOverlayZ, openOverlays } from "../state";
 import { api, type Thought, type Loop } from "../api";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ThoughtCard } from "./ThoughtCard";
@@ -48,6 +48,8 @@ export function DetailPanel() {
   const [loopFilter, setLoopFilter] = useState("");
   const [copied, setCopied] = useState(false);
   const loopFilterRef = useRef<HTMLInputElement>(null);
+  const [zIndex, setZIndex] = useState(50);
+  const [showScrim, setShowScrim] = useState(true);
 
   useEffect(() => {
     if (!id) {
@@ -57,6 +59,10 @@ export function DetailPanel() {
       setLoops([]);
       return;
     }
+    setShowScrim(openOverlays.value === 0);
+    setZIndex(nextOverlayZ());
+    openOverlays.value++;
+    return () => { openOverlays.value--; };
 
     setLoading(true);
     setShowRaw(false);
@@ -767,7 +773,7 @@ export function DetailPanel() {
   // Mobile: bottom sheet with swipe-to-close
   if (isMobile) {
     return (
-      <BottomSheet onClose={close}>
+      <BottomSheet onClose={close} noScrim={!showScrim} zIndex={zIndex}>
         {panelInner}
       </BottomSheet>
     );
@@ -776,10 +782,11 @@ export function DetailPanel() {
   // Desktop: side panel
   return (
     <div
-      class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+      class="fixed inset-0 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+      style={{ zIndex }}
       onClick={close}
     >
-      <div class="absolute inset-0 bg-black/40" />
+      {showScrim && <div class="absolute inset-0 bg-black/40" />}
       <div
         ref={contentRef}
         class={`detail-panel group relative w-full bg-[var(--bg-primary)] h-full overflow-y-auto transition-[max-width,border-color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${

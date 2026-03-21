@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { api, type Entity, type EntityFact, type Thought } from "../api";
-import { selectedThoughtId, showToast } from "../state";
+import { selectedThoughtId, showToast, nextOverlayZ, openOverlays } from "../state";
 import { BottomSheet } from "./BottomSheet";
 import { ThoughtCard } from "./ThoughtCard";
 import { SwipeableCard } from "./SwipeableCard";
@@ -42,6 +42,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
   const editRef = useRef<HTMLInputElement>(null);
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
+  const [zIndex, setZIndex] = useState(50);
+  const [showScrim, setShowScrim] = useState(true);
 
   useEffect(() => {
     if (!entityId) {
@@ -50,6 +52,10 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
       setNextCursor(null);
       return;
     }
+    setShowScrim(openOverlays.value === 0);
+    setZIndex(nextOverlayZ());
+    openOverlays.value++;
+    return () => { openOverlays.value--; };
 
     setLoading(true);
     setEditing(false);
@@ -368,10 +374,10 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
   if (isMobile) {
     return (
       <>
-        <BottomSheet onClose={onClose}>
+        <DetailPanel />
+        <BottomSheet onClose={onClose} noScrim={!showScrim} zIndex={zIndex}>
           {panelInner}
         </BottomSheet>
-        <DetailPanel />
       </>
     );
   }
@@ -379,11 +385,13 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
   // Desktop: side panel (same pattern as DetailPanel)
   return (
     <>
+      <DetailPanel />
       <div
-        class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+        class="fixed inset-0 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+        style={{ zIndex }}
         onClick={onClose}
       >
-        {!noScrim && <div class="absolute inset-0 bg-black/40" />}
+        {showScrim && !noScrim && <div class="absolute inset-0 bg-black/40" />}
         <div
           ref={contentRef}
           class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
@@ -399,7 +407,6 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
           {panelInner}
         </div>
       </div>
-      <DetailPanel />
     </>
   );
 }

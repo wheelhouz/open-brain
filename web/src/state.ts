@@ -41,3 +41,13 @@ export function showToast(message: string, type: Toast["type"] = "info") {
   const id = ++toastId;
   toasts.value = [...toasts.value, { id, message, type }];
 }
+
+// Overlay stacking: each panel gets an incrementing z-index so the most
+// recently opened panel always renders on top, regardless of DOM order.
+// openOverlays tracks how many overlays are currently visible so panels
+// can suppress their scrim when stacking on top of an existing overlay.
+let overlayCounter = 50;
+export const openOverlays = signal(0);
+export function nextOverlayZ(): number {
+  return ++overlayCounter;
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { selectedLoopId, selectedThoughtId, showToast } from "../state";
+import { selectedLoopId, selectedThoughtId, showToast, nextOverlayZ, openOverlays } from "../state";
 import { api, type Loop, type Thought } from "../api";
 import { BottomSheet } from "./BottomSheet";
 import { DetailPanel } from "./DetailPanel";
@@ -44,12 +44,18 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   const linkInputRef = useRef<HTMLInputElement>(null);
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
+  const [zIndex, setZIndex] = useState(50);
+  const [showScrim, setShowScrim] = useState(true);
 
   useEffect(() => {
     if (!id) {
       setLoop(null);
       return;
     }
+    setShowScrim(openOverlays.value === 0);
+    setZIndex(nextOverlayZ());
+    openOverlays.value++;
+    return () => { openOverlays.value--; };
 
     setLoading(true);
     setConfirmDelete(false);
@@ -577,10 +583,10 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   if (isMobile) {
     return (
       <>
-        <BottomSheet onClose={close}>
+        <DetailPanel />
+        <BottomSheet onClose={close} noScrim={!showScrim} zIndex={zIndex}>
           {panelInner}
         </BottomSheet>
-        <DetailPanel />
       </>
     );
   }
@@ -588,11 +594,13 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   // Desktop: side panel
   return (
     <>
+      <DetailPanel />
       <div
-        class="fixed inset-0 z-50 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+        class="fixed inset-0 flex justify-end animate-[fadeIn_0.15s_ease-out]"
+        style={{ zIndex }}
         onClick={close}
       >
-        <div class="absolute inset-0 bg-black/40" />
+        {showScrim && <div class="absolute inset-0 bg-black/40" />}
         <div
           ref={contentRef}
           class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
@@ -609,7 +617,6 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
           {panelInner}
         </div>
       </div>
-      <DetailPanel />
     </>
   );
 }

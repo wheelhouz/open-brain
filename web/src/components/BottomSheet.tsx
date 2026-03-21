@@ -6,6 +6,8 @@ interface BottomSheetProps {
   onClose: () => void;
   size?: "full" | "half";
   blur?: boolean;
+  noScrim?: boolean;
+  zIndex?: number;
 }
 
 const DISMISS_THRESHOLD = 80;
@@ -41,7 +43,7 @@ function useVisualViewport() {
   return { height, offsetTop, keyboardOpen };
 }
 
-export function BottomSheet({ children, onClose, size = "full", blur = true }: BottomSheetProps) {
+export function BottomSheet({ children, onClose, size = "full", blur = true, noScrim, zIndex: zIndexProp }: BottomSheetProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const gripperRef = useRef<HTMLDivElement>(null);
   const [dragY, setDragY] = useState(0);
@@ -128,11 +130,11 @@ export function BottomSheet({ children, onClose, size = "full", blur = true }: B
 
   return (
     <div
-      class={`fixed inset-0 z-50 flex flex-col justify-end animate-[fadeIn_0.15s_ease-out]`}
-      style={kbMode ? { top: `${vvOffsetTop}px`, height: `${vvHeight}px`, bottom: "auto" } : undefined}
+      class={`fixed inset-0 flex flex-col justify-end animate-[fadeIn_0.15s_ease-out]`}
+      style={{ zIndex: zIndexProp ?? 50, ...(kbMode ? { top: `${vvOffsetTop}px`, height: `${vvHeight}px`, bottom: "auto" } : {}) }}
       onClick={onClose}
     >
-      <div class={`absolute inset-0 bg-black/50 ${blur ? "backdrop-blur-sm" : ""}`} />
+      {!noScrim && <div class={`absolute inset-0 bg-black/50 ${blur ? "backdrop-blur-sm" : ""}`} />}
       <div
         ref={sheetRef}
         class={`bottom-sheet relative bg-[var(--bg-primary)] overscroll-contain overflow-y-auto ${!kbMode ? "safe-bottom" : ""} ${roundCorners ? "rounded-t-2xl" : ""} ${dismissing ? "sheet-dismissing" : ""}`}
