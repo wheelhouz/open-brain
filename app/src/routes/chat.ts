@@ -104,26 +104,30 @@ chatRouter.post("/", async (c) => {
         similarity: t.similarity,
       }));
     } else if (resolvedEntityId && isPersonSummary && hasLoopSignal) {
-      // Person-summary + loop signal → augmented entity-grounded (facts + thoughts + entity-linked loops)
+      // Person-summary + loop signal → entity-grounded facts/thoughts + broker-sourced loops
       const groundingContext = await buildEntityGroundingContext(resolvedEntityId, lastUserMsg.content);
       const contextBlock = formatEntityGroundingPrompt(groundingContext);
 
-      // Fetch entity-linked open loops
-      const entityLoops = await query(
-        `SELECT ol.id, ol.content, ol.loop_type, ol.created_at
-         FROM open_loops ol
-         JOIN entity_mentions em ON em.thought_id = ol.source_thought_id
-         WHERE em.entity_id = $1 AND ol.status = 'open'
-         ORDER BY ol.created_at DESC LIMIT 10`,
-        [resolvedEntityId],
-      );
+      // Loops via broker — provenance-based retrieval with source-thought scoring
+      const loopResult = await searchMemory({
+        query: rewrite.search_query,
+        filter: rewrite.filter,
+        timeHint: rewrite.time_hint,
+        memoryTypes: ["loops"],
+        preferOpenLoops: true,
+        entityIds: [resolvedEntityId],
+      });
+
+      const loopCandidates = loopResult.candidates.filter((c) => c.memory_type === "loop");
 
       let loopsBlock = "";
-      if (entityLoops.rows.length > 0) {
-        loopsBlock = (entityLoops.rows as any[])
-          .map((r, i) => {
-            const date = new Date(r.created_at).toISOString().split("T")[0];
-            return `[Loop ${i + 1}] (${date}, ${r.loop_type})\n${r.content}`;
+      if (loopCandidates.length > 0) {
+        loopsBlock = loopCandidates
+          .map((c, i) => {
+            const date = new Date(c.timestamp).toISOString().split("T")[0];
+            const loopType = (c.metadata?.loop_type as string) || "task";
+            const relevance = (c.score * 100).toFixed(0);
+            return `[Loop ${i + 1}] (relevance: ${relevance}%, ${date}, ${loopType})\n${c.content}`;
           })
           .join("\n\n");
       }
@@ -140,11 +144,11 @@ chatRouter.post("/", async (c) => {
         similarity: t.similarity,
       }));
 
-      loopSources = (entityLoops.rows as any[]).map((r) => ({
-        id: r.id,
-        content: (r.content as string).slice(0, 200),
-        score: 1.0,
-        loop_type: r.loop_type,
+      loopSources = loopCandidates.map((c) => ({
+        id: c.id,
+        content: c.content.slice(0, 200),
+        score: c.score,
+        loop_type: (c.metadata?.loop_type as string) || "task",
       }));
     } else {
       // Default / action-status broker path

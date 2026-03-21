@@ -60,6 +60,8 @@ export interface SearchMemoryResult {
 
 const RECENCY_HALF_LIFE_DAYS = 30;
 const RECENCY_HALF_LIFE_DAYS_TIME = 14;
+const ENTITY_LINK_BOOST = 0.15;
+const STRUCTURAL_DEFAULT_SCORE = 0.25;
 
 function recencyScore(createdAt: string | Date, halfLifeDays: number): number {
   const ageMs = Date.now() - new Date(createdAt).getTime();
@@ -431,7 +433,6 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
 
       if (terms.length > 0) {
         const existingIds = new Set(candidates.map((c) => c.id));
-        const pattern = terms.map((t) => `%${t}%`).join("");
         // Use ILIKE with each term individually for broader matching
         const termConditions = terms.map((_, i) => `content ILIKE $${i + 1}`);
         const lexicalResult = await query(
@@ -473,6 +474,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
   if (shouldQuery("loops")) {
     const currentModel = config.embeddingModel;
     const loopIds = new Set<string>();
+    const loopScores = new Map<string, number>(); // track best score per loop
 
     // Count model mismatches for diagnostics
     const mismatchResult = await query(
@@ -484,11 +486,77 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     );
     modelMismatchExclusions = mismatchResult.rows[0]?.count ?? 0;
 
-    // Fix 1: Entity-filtered loop retrieval
-    // When entity IDs are provided, constrain loops to those linked via entity_mentions
+    const hasEntityScope = options.entityIds && options.entityIds.length > 0;
+    const isActionQuery = options.preferOpenLoops === true;
+
+    // --- Structural provenance recall (entity-linked loops) ---
+    // Fires when BOTH: entity is resolved AND query is action/status-oriented
+    // Fetches loops by entity → mentions → source_thought → loops (no embedding required)
+    const structuralLoops: Array<{ id: string; content: string; loop_type: string; status: string; source_thought_id: string; created_at: string }> = [];
+
+    if (hasEntityScope && isActionQuery) {
+      const structuralResult = await query(
+        `SELECT * FROM (
+           SELECT DISTINCT ON (ol.id)
+                  ol.id, ol.content, ol.loop_type, ol.status, ol.source_thought_id, ol.created_at
+           FROM open_loops ol
+           JOIN entity_mentions em ON em.thought_id = ol.source_thought_id
+           WHERE em.entity_id = ANY($1)
+             AND (ol.status = 'open' OR (ol.status = 'snoozed' AND ol.snoozed_until <= now()))
+           ORDER BY ol.id
+         ) deduped
+         ORDER BY created_at DESC`,
+        [options.entityIds],
+      );
+
+      structuralLoops.push(...(structuralResult.rows as any[]));
+
+      // Fetch source thought embeddings for scoring
+      const sourceThoughtIds = [...new Set(structuralLoops.map((l) => l.source_thought_id).filter(Boolean))];
+      const sourceThoughtSimilarities = new Map<string, number>();
+
+      if (sourceThoughtIds.length > 0) {
+        const sourceThoughts = await query(
+          `SELECT id, 1 - (embedding <=> $1) as similarity
+           FROM thoughts
+           WHERE id = ANY($2) AND deleted_at IS NULL AND embedding IS NOT NULL`,
+          [embeddingSql, sourceThoughtIds],
+        );
+        for (const r of sourceThoughts.rows as any[]) {
+          sourceThoughtSimilarities.set(r.id, r.similarity);
+        }
+      }
+
+      for (const r of structuralLoops) {
+        loopIds.add(r.id);
+        const sourceThoughtSim = sourceThoughtSimilarities.get(r.source_thought_id) ?? null;
+        const baseScore = sourceThoughtSim !== null ? sourceThoughtSim : STRUCTURAL_DEFAULT_SCORE;
+        const score = baseScore + ENTITY_LINK_BOOST;
+        loopScores.set(r.id, score);
+
+        candidates.push({
+          memory_type: "loop",
+          id: r.id,
+          content: r.content,
+          source: "open_loops",
+          score,
+          timestamp: r.created_at,
+          metadata: {
+            loop_type: r.loop_type,
+            status: r.status,
+            source_thought_id: r.source_thought_id,
+            _provenance: true,
+          },
+        });
+      }
+    }
+
+    // --- Semantic loop retrieval (vector similarity on loop content) ---
+    // Secondary/supplementary: catches semantically relevant loops, explicit name matches,
+    // and loops whose source thought was not properly linked
     let entityFilter = "";
     const loopParams: unknown[] = [embeddingSql, currentModel, limit];
-    if (options.entityIds && options.entityIds.length > 0) {
+    if (hasEntityScope) {
       entityFilter = `AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($4))`;
       loopParams.push(options.entityIds);
     }
@@ -509,43 +577,48 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
 
     for (const r of loopResult.rows as any[]) {
       if (r.similarity >= threshold) {
-        loopIds.add(r.id);
-        candidates.push({
-          memory_type: "loop",
-          id: r.id,
-          content: r.content,
-          source: "open_loops",
-          score: r.similarity,
-          timestamp: r.created_at,
-          metadata: {
-            loop_type: r.loop_type,
-            status: r.status,
-            source_thought_id: r.source_thought_id,
-            embedding_model: r.embedding_model,
-          },
-        });
+        if (loopIds.has(r.id)) {
+          // Loop already from structural recall — take best score
+          const existingScore = loopScores.get(r.id) ?? 0;
+          const semanticScore = r.similarity;
+          if (semanticScore > existingScore) {
+            // Update the candidate's score to the better one (keep entity boost)
+            const newScore = hasEntityScope && isActionQuery ? semanticScore + ENTITY_LINK_BOOST : semanticScore;
+            const existing = candidates.find((c) => c.id === r.id && c.memory_type === "loop");
+            if (existing) existing.score = Math.max(existing.score, newScore);
+            loopScores.set(r.id, Math.max(existingScore, newScore));
+          }
+        } else {
+          loopIds.add(r.id);
+          loopScores.set(r.id, r.similarity);
+          candidates.push({
+            memory_type: "loop",
+            id: r.id,
+            content: r.content,
+            source: "open_loops",
+            score: r.similarity,
+            timestamp: r.created_at,
+            metadata: {
+              loop_type: r.loop_type,
+              status: r.status,
+              source_thought_id: r.source_thought_id,
+              embedding_model: r.embedding_model,
+            },
+          });
+        }
       }
     }
 
-    // Fix 2: Status-query loop injection
-    // When intent signals open tasks, supplement vector results with direct actionable-loop fetch
-    // Same pattern as recent-thought augmentation
-    if (options.preferOpenLoops) {
-      let directSql = `SELECT id, content, loop_type, status, source_thought_id, created_at
+    // --- Direct injection for non-entity action queries ---
+    // When preferOpenLoops is true but no entity scope, supplement with recent actionable loops
+    if (isActionQuery && !hasEntityScope) {
+      const directResult = await query(
+        `SELECT id, content, loop_type, status, source_thought_id, created_at
          FROM open_loops
-         WHERE (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))`;
-      const directParams: unknown[] = [];
-      let paramIdx = 1;
-
-      if (options.entityIds && options.entityIds.length > 0) {
-        directSql += ` AND source_thought_id IN (SELECT thought_id FROM entity_mentions WHERE entity_id = ANY($${paramIdx++}))`;
-        directParams.push(options.entityIds);
-      }
-
-      directSql += ` ORDER BY created_at DESC LIMIT $${paramIdx}`;
-      directParams.push(limit);
-
-      const directResult = await query(directSql, directParams);
+         WHERE (status = 'open' OR (status = 'snoozed' AND snoozed_until <= now()))
+         ORDER BY created_at DESC LIMIT $1`,
+        [limit],
+      );
 
       for (const r of directResult.rows as any[]) {
         if (!loopIds.has(r.id)) {
@@ -555,7 +628,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
             id: r.id,
             content: r.content,
             source: "open_loops",
-            score: 0.3, // baseline score for injected loops
+            score: 0.3,
             timestamp: r.created_at,
             metadata: {
               loop_type: r.loop_type,
