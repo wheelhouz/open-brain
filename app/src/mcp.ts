@@ -623,7 +623,7 @@ export function createMcpServer(): McpServer {
 
       const existing = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND lower(predicate) = lower($2) AND review_state != 'rejected'`,
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND review_state != 'rejected'`,
         [entity.id, normalizedPredicate],
       );
 
@@ -742,7 +742,7 @@ export function createMcpServer(): McpServer {
 
       const conflicts = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
            AND (status = 'active' OR status = 'disputed') AND review_state != 'rejected'`,
         [f.entity_id, f.predicate, fact_id],
       );
@@ -798,7 +798,7 @@ export function createMcpServer(): McpServer {
 
       const oldFact = await query(
         `SELECT id, object_display_text FROM entity_facts
-         WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
            AND status = 'disputed' AND review_state != 'rejected'
          LIMIT 1`,
         [f.entity_id, f.predicate, fact_id],

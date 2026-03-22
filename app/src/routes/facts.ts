@@ -94,7 +94,7 @@ factsRouter.post("/", async (c) => {
   // Check for conflicts
   const existing = await query<{ id: string; predicate: string; object_display_text: string; status: string }>(
     `SELECT id, predicate, object_display_text, status FROM entity_facts
-     WHERE entity_id = $1 AND lower(predicate) = lower($2) AND review_state != 'rejected'`,
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND review_state != 'rejected'`,
     [entityId, predicate],
   );
 
@@ -236,7 +236,7 @@ factsRouter.post("/:factId/accept", async (c) => {
   // Check for conflicts (active OR disputed with same predicate)
   const conflicts = await query<{ id: string; predicate: string; object_display_text: string; status: string }>(
     `SELECT id, predicate, object_display_text, status FROM entity_facts
-     WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
        AND (status = 'active' OR status = 'disputed')
        AND review_state != 'rejected'`,
     [entityId, factResult.rows[0].predicate, factId],
@@ -280,7 +280,7 @@ factsRouter.post("/:factId/reject", async (c) => {
   if (fact.status === "disputed") {
     await query(
       `UPDATE entity_facts SET status = 'active', updated_at = now()
-       WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
          AND status = 'disputed' AND review_state != 'rejected'`,
       [entityId, fact.predicate, factId],
     );
@@ -319,7 +319,7 @@ factsRouter.post("/:factId/resolve-conflict", async (c) => {
 
   const oldFact = await query<{ id: string }>(
     `SELECT id FROM entity_facts
-     WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
        AND status = 'disputed' AND review_state != 'rejected'
      LIMIT 1`,
     [entityId, newFact.rows[0].predicate, factId],
@@ -378,7 +378,7 @@ factsRouter.delete("/:factId", async (c) => {
   if (fact.status === "disputed") {
     await query(
       `UPDATE entity_facts SET status = 'active', updated_at = now()
-       WHERE entity_id = $1 AND lower(predicate) = lower($2) AND id != $3
+       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
          AND status = 'disputed' AND review_state != 'rejected'`,
       [entityId, fact.predicate, factId],
     );
