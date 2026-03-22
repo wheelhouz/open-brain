@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 import { api, type Entity, type EntityFact, type Thought } from "../api";
-import { selectedThoughtId, showToast, nextOverlayZ, openOverlays } from "../state";
+import { selectedThoughtId, showToast, nextOverlayZ } from "../state";
 import { BottomSheet } from "./BottomSheet";
 import { ThoughtCard } from "./ThoughtCard";
 import { SwipeableCard } from "./SwipeableCard";
@@ -43,7 +43,6 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
   const [zIndex, setZIndex] = useState(50);
-  const [showScrim, setShowScrim] = useState(true);
 
   useEffect(() => {
     if (!entityId) {
@@ -52,9 +51,7 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
       setNextCursor(null);
       return;
     }
-    setShowScrim(openOverlays.value === 0);
     setZIndex(nextOverlayZ());
-    openOverlays.value++;
 
     setLoading(true);
     setEditing(false);
@@ -75,7 +72,6 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
       setLoading(false);
     });
 
-    return () => { openOverlays.value--; };
   }, [entityId]);
 
   const loadMore = useCallback(() => {
@@ -376,7 +372,7 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
     return (
       <>
         <DetailPanel />
-        <BottomSheet onClose={onClose} noScrim={!showScrim} zIndex={zIndex}>
+        <BottomSheet onClose={onClose} zIndex={zIndex}>
           {panelInner}
         </BottomSheet>
       </>
@@ -392,7 +388,7 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
         style={{ zIndex }}
         onClick={onClose}
       >
-        {showScrim && !noScrim && <div class="absolute inset-0 bg-black/40" />}
+        {!noScrim && <div class="absolute inset-0 bg-black/40" />}
         <div
           ref={contentRef}
           class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"

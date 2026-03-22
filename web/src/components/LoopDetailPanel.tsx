@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "preact/hooks";
-import { selectedLoopId, selectedThoughtId, showToast, nextOverlayZ, openOverlays } from "../state";
+import { selectedLoopId, selectedThoughtId, showToast, nextOverlayZ } from "../state";
 import { api, type Loop, type Thought } from "../api";
 import { BottomSheet } from "./BottomSheet";
 import { DetailPanel } from "./DetailPanel";
@@ -45,16 +45,13 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
   const isMobile = useMobileDetect();
   const contentRef = useRef<HTMLDivElement>(null);
   const [zIndex, setZIndex] = useState(50);
-  const [showScrim, setShowScrim] = useState(true);
 
   useEffect(() => {
     if (!id) {
       setLoop(null);
       return;
     }
-    setShowScrim(openOverlays.value === 0);
     setZIndex(nextOverlayZ());
-    openOverlays.value++;
 
     setLoading(true);
     setConfirmDelete(false);
@@ -76,7 +73,6 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
       setLoading(false);
     });
 
-    return () => { openOverlays.value--; };
   }, [id]);
 
   // Lock body scroll on mobile when panel is open
@@ -585,7 +581,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     return (
       <>
         <DetailPanel />
-        <BottomSheet onClose={close} noScrim={!showScrim} zIndex={zIndex}>
+        <BottomSheet onClose={close} zIndex={zIndex}>
           {panelInner}
         </BottomSheet>
       </>
@@ -601,7 +597,7 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
         style={{ zIndex }}
         onClick={close}
       >
-        {showScrim && <div class="absolute inset-0 bg-black/40" />}
+        <div class="absolute inset-0 bg-black/40" />
         <div
           ref={contentRef}
           class="detail-panel relative w-full max-w-xl bg-[var(--bg-primary)] h-full overflow-y-auto border-l border-[var(--border-color)]"
