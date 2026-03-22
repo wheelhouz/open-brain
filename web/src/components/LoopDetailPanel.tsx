@@ -55,7 +55,6 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
     setShowScrim(openOverlays.value === 0);
     setZIndex(nextOverlayZ());
     openOverlays.value++;
-    return () => { openOverlays.value--; };
 
     setLoading(true);
     setConfirmDelete(false);
@@ -76,6 +75,8 @@ export function LoopDetailPanel({ onLoopChanged }: LoopDetailPanelProps) {
       showToast("Failed to load loop", "error");
       setLoading(false);
     });
+
+    return () => { openOverlays.value--; };
   }, [id]);
 
   // Lock body scroll on mobile when panel is open

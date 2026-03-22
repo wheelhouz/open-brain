@@ -55,7 +55,6 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
     setShowScrim(openOverlays.value === 0);
     setZIndex(nextOverlayZ());
     openOverlays.value++;
-    return () => { openOverlays.value--; };
 
     setLoading(true);
     setEditing(false);
@@ -75,6 +74,8 @@ export function EntityDetailPanel({ entityId, onClose, onEntityChanged, noScrim 
       showToast("Failed to load entity", "error");
       setLoading(false);
     });
+
+    return () => { openOverlays.value--; };
   }, [entityId]);
 
   const loadMore = useCallback(() => {

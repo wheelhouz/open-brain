@@ -62,7 +62,6 @@ export function DetailPanel() {
     setShowScrim(openOverlays.value === 0);
     setZIndex(nextOverlayZ());
     openOverlays.value++;
-    return () => { openOverlays.value--; };
 
     setLoading(true);
     setShowRaw(false);
@@ -91,6 +90,8 @@ export function DetailPanel() {
       showToast("Failed to load thought", "error");
       setLoading(false);
     });
+
+    return () => { openOverlays.value--; };
   }, [id]);
 
   // Lock body scroll on mobile when panel is open
