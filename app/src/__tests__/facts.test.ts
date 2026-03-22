@@ -20,7 +20,7 @@ vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
 }));
 
-import { processFactCandidates, normalizePredicate, renderFactEmbeddingText } from "../facts.js";
+import { processFactCandidates, normalizePredicate, renderFactEmbeddingText, isValidPredicateShape } from "../facts.js";
 import type { MentionResolution } from "../entities.js";
 
 describe("normalizePredicate", () => {
@@ -28,13 +28,55 @@ describe("normalizePredicate", () => {
     expect(normalizePredicate("  Birthday  ")).toBe("birthday");
   });
 
-  it("collapses whitespace", () => {
-    expect(normalizePredicate("works  at")).toBe("works at");
+  it("converts spaces to underscores", () => {
+    expect(normalizePredicate("works at")).toBe("works_at");
+    expect(normalizePredicate("Works At")).toBe("works_at");
+  });
+
+  it("collapses whitespace to single underscore", () => {
+    expect(normalizePredicate("works  at")).toBe("works_at");
+  });
+
+  it("is idempotent for snake_case input", () => {
+    expect(normalizePredicate("works_at")).toBe("works_at");
+  });
+
+  it("converts hyphens to underscores", () => {
+    expect(normalizePredicate("co-owns")).toBe("co_owns");
   });
 
   it("strips trailing punctuation", () => {
     expect(normalizePredicate("from:")).toBe("from");
     expect(normalizePredicate("born_on.")).toBe("born_on");
+  });
+
+  it("strips leading/trailing underscores", () => {
+    expect(normalizePredicate("_works_at_")).toBe("works_at");
+  });
+});
+
+describe("isValidPredicateShape", () => {
+  it("accepts valid predicates", () => {
+    expect(isValidPredicateShape("works_at")).toEqual({ valid: true });
+    expect(isValidPredicateShape("from")).toEqual({ valid: true });
+    expect(isValidPredicateShape("co_owns")).toEqual({ valid: true });
+  });
+
+  it("rejects empty predicate", () => {
+    expect(isValidPredicateShape("")).toEqual({ valid: false, reason: "empty_predicate" });
+  });
+
+  it("rejects predicates longer than 40 chars", () => {
+    expect(isValidPredicateShape("a".repeat(41))).toEqual({ valid: false, reason: "predicate_too_long" });
+  });
+
+  it("rejects predicates with more than 3 tokens", () => {
+    expect(isValidPredicateShape("mentioned_that_she_prefers")).toEqual({ valid: false, reason: "predicate_too_many_tokens" });
+  });
+
+  it("rejects denylist predicates", () => {
+    expect(isValidPredicateShape("related_to")).toEqual({ valid: false, reason: "predicate_denylist" });
+    expect(isValidPredicateShape("said")).toEqual({ valid: false, reason: "predicate_denylist" });
   });
 });
 
@@ -65,9 +107,10 @@ describe("processFactCandidates", () => {
 
   it("skips candidates below confidence threshold", async () => {
     await processFactCandidates(
-      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.5, excerpt: "..." }],
+      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.5, excerpt: "from Porto" }],
       "thought-1",
       mentionMap,
+      "Maya is from Porto",
     );
 
     // No DB queries for fact insertion
@@ -80,9 +123,10 @@ describe("processFactCandidates", () => {
     ];
 
     await processFactCandidates(
-      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "..." }],
+      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "from Porto" }],
       "thought-1",
       unresolvedMap,
+      "Maya is from Porto",
     );
 
     expect(mockQuery).not.toHaveBeenCalled();
@@ -99,6 +143,7 @@ describe("processFactCandidates", () => {
       [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "grew up in Porto" }],
       "thought-1",
       mentionMap,
+      "Maya grew up in Porto and loves the city",
     );
 
     // Verify fact insert
@@ -128,6 +173,7 @@ describe("processFactCandidates", () => {
       [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "born in Porto" }],
       "thought-1",
       mentionMap,
+      "Maya was born in Porto",
     );
 
     // Should NOT insert a new fact
@@ -152,6 +198,7 @@ describe("processFactCandidates", () => {
       [{ entity: "Maya", predicate: "lives_in", value: "Portland", display: "Portland", confidence: 0.9, excerpt: "moved to Portland" }],
       "thought-1",
       mentionMap,
+      "Maya moved to Portland last year",
     );
 
     // New fact inserted as disputed
@@ -177,9 +224,79 @@ describe("processFactCandidates", () => {
       [{ entity: "Maya", predicate: "lives_in", value: "Portland", display: "Portland", confidence: 0.9, excerpt: "now in Portland" }],
       "thought-1",
       mentionMap,
+      "Maya is now in Portland",
     );
 
     const insertCall = mockQuery.mock.calls[1];
     expect(insertCall[0]).toContain("tentative"); // not disputed
+  });
+
+  it("logs structured event when candidate is below confidence threshold", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await processFactCandidates(
+      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.5, excerpt: "from Porto" }],
+      "thought-1",
+      mentionMap,
+      "Maya is from Porto",
+    );
+
+    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    expect(logCalls).toContainEqual(expect.objectContaining({
+      event: "fact_skipped",
+      reason: "confidence_below_threshold",
+      thoughtId: "thought-1",
+      entity: "Maya",
+    }));
+    logSpy.mockRestore();
+  });
+
+  it("logs structured event when entity is unresolved", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const unresolvedMap: MentionResolution[] = [
+      { ...mentionMap[0], resolution_state: "pending_review" },
+    ];
+
+    await processFactCandidates(
+      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.9, excerpt: "from Porto" }],
+      "thought-1",
+      unresolvedMap,
+      "Maya is from Porto",
+    );
+
+    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    expect(logCalls).toContainEqual(expect.objectContaining({
+      event: "fact_skipped",
+      reason: "entity_unresolved",
+      thoughtId: "thought-1",
+      entity: "Maya",
+      resolution_state: "pending_review",
+    }));
+    logSpy.mockRestore();
+  });
+
+  it("clamps out-of-range confidence to 0 and logs", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await processFactCandidates(
+      [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 1.5, excerpt: "from Porto" }],
+      "thought-1",
+      mentionMap,
+      "Maya is from Porto",
+    );
+
+    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    expect(logCalls).toContainEqual(expect.objectContaining({
+      event: "fact_candidate_clamped",
+      thoughtId: "thought-1",
+      original: 1.5,
+    }));
+    // After clamping to 0, it should be below threshold and skipped
+    expect(logCalls).toContainEqual(expect.objectContaining({
+      event: "fact_skipped",
+      reason: "confidence_below_threshold",
+    }));
+    expect(mockQuery).not.toHaveBeenCalled();
+    logSpy.mockRestore();
   });
 });

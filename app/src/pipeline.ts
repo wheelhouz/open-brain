@@ -157,7 +157,7 @@ export async function capturePipeline(
   const factCandidates = "fact_candidates" in metadata ? metadata.fact_candidates : undefined;
   if (factCandidates && factCandidates.length > 0 && mentionMap.length > 0) {
     try {
-      await processFactCandidates(factCandidates, thoughtId, mentionMap);
+      await processFactCandidates(factCandidates, thoughtId, mentionMap, content);
     } catch {
       // Don't fail capture if fact processing fails
     }

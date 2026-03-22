@@ -62,20 +62,22 @@ const EXTRACTION_PROMPT = `You are a thought classifier. Given the following tho
     "action_items": array of objects with "content" and "loop_type" (empty array if none),
     "dates_mentioned": dates in YYYY-MM-DD format (empty array if none),
     "source_context": one of "ai_save", "meeting", "migration", "manual" or null,
-    "fact_candidates": array of factual claims about named entities found in the text. Each object has:
-        "entity": name of the person/entity this fact is about (must match a name from the "people" array),
-        "predicate": the relationship or attribute (e.g. "from", "born_on", "works_at", "lives_in"),
+    "fact_candidates": array of durable facts about people — identity, background, roles, relationships, preferences, online presence. These should be useful to remember weeks or months later. Each object has:
+        "entity": name of the person this fact is about (must match a name from the "people" array),
+        "predicate": short snake_case relationship or attribute. Examples: works_at, lives_in, from, born_on, studied_at, role, title, spouse, partner, child, created, owns, collaborating_on, prefers, likes, dislikes, newsletter_url, youtube_channel, website, speaks. Use any well-formed snake_case predicate — not sentence phrases or verb clauses,
         "value": the structured value (use YYYY-MM-DD for dates),
         "display": human-readable display text for the value,
         "confidence": 0.0-1.0 how explicitly the fact is stated (1.0 = directly stated, 0.5 = implied),
-        "excerpt": the specific text that supports this fact
-    Only include facts explicitly stated in the text. Do not infer unstated facts. Empty array if none.
+        "excerpt": exact character-for-character substring from the input text that supports this fact — do not paraphrase, normalize, or rephrase
+    Do NOT extract: meeting events or one-time activities (had lunch with, met at, talked to), plans or intentions (planning to, wants to, going to), tasks or follow-ups, questions or uncertain statements (need to ask if, wondering whether), speculative language (might, maybe, probably), or generic observations about what happened today.
+    Only include facts explicitly stated in a single supporting excerpt. If no high-confidence durable fact exists for a person, omit that person from fact_candidates entirely. Empty array if none.
 
-    Example: "Had coffee with Maya. She's from Porto and works at Anthropic." →
+    Example: "Had coffee with Maya. She's from Porto and works at Anthropic. Need to ask if she still likes climbing." →
     fact_candidates: [
         {"entity": "Maya", "predicate": "from", "value": "Porto", "display": "Porto", "confidence": 1.0, "excerpt": "She's from Porto"},
         {"entity": "Maya", "predicate": "works_at", "value": "Anthropic", "display": "Anthropic", "confidence": 1.0, "excerpt": "works at Anthropic"}
     ]
+    Note: "had coffee" is a one-time event, not a durable fact. "likes climbing" appears in a question, so it is not extracted.
 }
 
 action_items loop_type values:
