@@ -569,9 +569,7 @@ export function DetailPanel() {
                         key={loop.id}
                         class="text-sm flex items-start gap-2 leading-relaxed cursor-pointer hover:bg-[var(--surface-hover)] rounded-md px-1.5 py-1 -mx-1.5 transition-colors"
                         onClick={() => {
-                          selectedThoughtId.value = null;
                           selectedLoopId.value = loop.id;
-                          route("/loops?id=" + loop.id + "&status=" + loop.status);
                         }}
                       >
                         <span class={`mt-0.5 flex-shrink-0 text-xs ${loop.status === "closed" ? "text-green-500" : loop.status === "snoozed" ? "text-yellow-500" : "text-[var(--type-task)]"}`}>

@@ -4,7 +4,6 @@ import { api, type ChatMessage, type SourceThought, type SourceLoop, type Though
 import { selectedThoughtId, selectedLoopId, showToast } from "../state";
 import { MarkdownRenderer } from "../components/MarkdownRenderer";
 import { DetailPanel } from "../components/DetailPanel";
-import { LoopDetailPanel } from "../components/LoopDetailPanel";
 import { ThoughtCard } from "../components/ThoughtCard";
 import { Send, Brain, Sparkles, Bookmark, BookmarkCheck, CircleDot } from "lucide-preact";
 
@@ -347,7 +346,6 @@ export function ChatView(_props: RoutableProps) {
       </div>
 
       <DetailPanel />
-      <LoopDetailPanel />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { CaptureBar } from "./CaptureBar";
 import { SearchBar } from "./SearchBar";
 import { LoopsView } from "../views/LoopsView";
 import { PersonOverlay } from "./PersonOverlay";
+import { LoopDetailPanel } from "./LoopDetailPanel";
 import { Brain, List, Hash, Users, BarChart3, MessageCircle, CircleDot } from "lucide-preact";
 
 const tabs = [
@@ -145,8 +146,9 @@ export function App() {
           </div>
         )}
 
-        {/* Person overlay (global — opens from any person badge click) */}
+        {/* Global overlays — open from any view */}
         <PersonOverlay />
+        <LoopDetailPanel />
 
         {/* Toasts */}
         <ToastContainer />

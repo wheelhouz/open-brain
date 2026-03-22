@@ -4,7 +4,6 @@ import { api, type Loop, type LoopsResponse } from "../api";
 import { showToast, selectedLoopId } from "../state";
 import { LoopCard } from "../components/LoopCard";
 import { SwipeableLoopCard } from "../components/SwipeableLoopCard";
-import { LoopDetailPanel } from "../components/LoopDetailPanel";
 import { useUrlSignal } from "../hooks/useUrlSignal";
 
 const statusTabs = [
@@ -202,6 +201,16 @@ export function LoopsView(_props: RoutableProps) {
     setRefreshKey((k) => k + 1);
   }, [loadLoops]);
 
+  // Refresh list when loop detail panel closes (loop may have been modified)
+  const prevLoopId = useRef(selectedLoopId.value);
+  useEffect(() => {
+    const id = selectedLoopId.value;
+    if (prevLoopId.current && !id) {
+      onLoopChanged();
+    }
+    prevLoopId.current = id;
+  });
+
   const handleSwipeDelete = useCallback(async (loopId: string) => {
     await api.deleteLoop(loopId);
     showToast("Loop deleted", "success");
@@ -348,7 +357,6 @@ export function LoopsView(_props: RoutableProps) {
         </div>
       )}
 
-      <LoopDetailPanel onLoopChanged={onLoopChanged} />
     </div>
   );
 }
