@@ -84,6 +84,38 @@ Pre-built images are available at `ghcr.io/wheelhouz/open-brain:latest`. Running
 
 For Synology NAS-specific instructions (Portainer, HTTPS, reverse proxy), see [deploy/synology/README.md](deploy/synology/README.md).
 
+### Monitoring Stack
+
+The production stack includes Prometheus, Grafana, Loki, and Promtail for metrics, dashboards, log aggregation, and alerting. All monitoring configs are bundled in a separate Docker image (`ghcr.io/wheelhouz/open-brain-config`) — no manual file copying required.
+
+**How it works:**
+
+1. CI builds two images on every push to `main`:
+   - `ghcr.io/wheelhouz/open-brain:latest` — the app
+   - `ghcr.io/wheelhouz/open-brain-config:latest` — monitoring configs
+2. On deploy, a `config-init` container copies configs from the image to a shared Docker volume, then exits
+3. Prometheus, Grafana, Loki, and Promtail mount the shared volume and read their configs from it
+
+**What's in the config image:**
+
+| File | Purpose |
+|------|---------|
+| `prometheus.yml` | Scrape config (targets, interval) |
+| `alert-rules.yml` | Prometheus alert rules (app down, error rate, budget cutoff) |
+| `loki.yml` | Loki storage and retention config |
+| `promtail.yml` | Docker log scraping + pino JSON parsing |
+| `grafana/provisioning/` | Auto-provisions Prometheus + Loki datasources |
+| `grafana/dashboards/` | "Open Brain" dashboard with metrics + logs panels |
+
+**Config sources live in `deploy/monitoring/`** — edit there, push to `main`, and the config image rebuilds automatically. On the NAS, redeploy the Portainer stack to pick up changes.
+
+**Grafana dashboard sections:**
+- **Knowledge Health** — capture rate, enrichment success, open loops, pending facts
+- **AI Spend** — daily cost, token usage by operation, MCP vs REST spend
+- **MCP Activity** — tool call frequency, latency, error rate, active sessions
+- **System Health** — OpenRouter errors, DB pool, queue depth, HTTP request rate
+- **Logs** — application logs, errors, MCP audit trail, auth failures, pipeline results
+
 ## MCP Server
 
 The MCP endpoint is available at `/mcp` and supports two auth methods:
