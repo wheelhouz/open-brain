@@ -6,6 +6,7 @@ import { processFactCandidates } from "./facts.js";
 import pgvector from "pgvector";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { capturesTotal } from "./metrics.js";
 
 export async function createLoopsFromActionItems(
   actionItems: Array<{ content: string; loop_type: string } | string>,
@@ -106,6 +107,7 @@ export async function capturePipeline(
   );
 
   const thoughtId = result.rows[0].id;
+  capturesTotal.inc({ status: "ok", source: source || "unknown" });
 
   // Auto-categorize new topics (best-effort, don't block capture)
   if (metadata.topics.length > 0) {

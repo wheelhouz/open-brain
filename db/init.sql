@@ -72,6 +72,14 @@ CREATE INDEX IF NOT EXISTS idx_open_loops_status_snoozed
 CREATE INDEX IF NOT EXISTS idx_open_loops_source_thought
     ON open_loops (source_thought_id) WHERE source_thought_id IS NOT NULL;
 
+-- Open Loop Evidence (links loops to supporting thoughts)
+CREATE TABLE IF NOT EXISTS open_loop_evidence (
+    loop_id    UUID REFERENCES open_loops(id) ON DELETE CASCADE,
+    thought_id UUID REFERENCES thoughts(id),
+    noted_at   TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (loop_id, thought_id)
+);
+
 -- Deduplicate open_loops before creating unique index (keeps earliest row per content+source)
 DELETE FROM open_loop_evidence WHERE loop_id IN (
     SELECT id FROM open_loops WHERE source_thought_id IS NOT NULL AND id NOT IN (
@@ -88,14 +96,6 @@ DELETE FROM open_loops WHERE source_thought_id IS NOT NULL AND id NOT IN (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_open_loops_content_source
     ON open_loops (md5(content), source_thought_id) WHERE source_thought_id IS NOT NULL;
-
--- Open Loop Evidence (links loops to supporting thoughts)
-CREATE TABLE IF NOT EXISTS open_loop_evidence (
-    loop_id    UUID REFERENCES open_loops(id) ON DELETE CASCADE,
-    thought_id UUID REFERENCES thoughts(id),
-    noted_at   TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (loop_id, thought_id)
-);
 
 -- Entities (canonical person records, extensible to other types)
 CREATE TABLE IF NOT EXISTS entities (

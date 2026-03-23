@@ -2,6 +2,7 @@ import { query } from "./db.js";
 import { config } from "./config.js";
 import { generateEmbedding, sourceContext } from "./openrouter.js";
 import { logger } from "./logger.js";
+import { queueJobsTotal } from "./metrics.js";
 import pgvector from "pgvector";
 
 const MAX_ATTEMPTS = 5;
@@ -115,6 +116,7 @@ async function processJob(
     );
 
     logger.info({ event: "job_completed", jobId, loopId: payload.loop_id, latencyMs: Date.now() - start });
+    queueJobsTotal.inc({ status: "complete" });
   } catch (err) {
     const attemptCount = job.attempt_count as number;
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -124,6 +126,7 @@ async function processJob(
         [errorMsg, jobId],
       );
       logger.error({ event: "job_permanently_failed", jobId, loopId: payload.loop_id, attempts: attemptCount });
+      queueJobsTotal.inc({ status: "failed" });
     } else {
       // Reset to pending with backoff
       await query(
