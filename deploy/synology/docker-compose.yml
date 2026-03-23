@@ -100,7 +100,7 @@ services:
     command: -config.file=/config/promtail.yml
     volumes:
       - monitoring_config:/config:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /volume1/@docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       config-init:
