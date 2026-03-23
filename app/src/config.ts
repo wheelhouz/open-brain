@@ -1,3 +1,10 @@
+const requiredEnvVars = ["DATABASE_URL", "BRAIN_ACCESS_KEY", "OPENROUTER_API_KEY"] as const;
+for (const key of requiredEnvVars) {
+  if (!process.env[key]) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "8420", 10),
   databaseUrl: process.env.DATABASE_URL!,

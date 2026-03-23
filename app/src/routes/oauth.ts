@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { config } from "../config.js";
+import { validateAccessKey } from "../auth.js";
 
 const oauthRouter = new Hono();
 
@@ -116,7 +117,7 @@ oauthRouter.post("/authorize", async (c) => {
   const codeChallenge = body["code_challenge"] as string;
   const codeChallengeMethod = body["code_challenge_method"] as string;
 
-  if (accessKey !== config.brainAccessKey) {
+  if (!validateAccessKey(accessKey as string)) {
     return c.html(
       `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
         <p>Invalid access key. <a href="javascript:history.back()" style="color:#3b82f6">Try again</a></p>

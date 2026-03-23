@@ -257,10 +257,9 @@ export function createMcpServer(): McpServer {
     "Import multiple thoughts at once. Used for migrating from other knowledge systems.",
     {
       thoughts: z.array(z.string()).describe("Array of thought content strings to import"),
-      normalize: z.boolean().default(true).describe("Rewrite each thought to be self-contained"),
       source_label: z.string().optional().describe("Origin system label"),
     },
-    async ({ thoughts, normalize, source_label }) => {
+    async ({ thoughts, source_label }) => {
       let imported = 0;
       let failed = 0;
 
@@ -434,6 +433,17 @@ export function createMcpServer(): McpServer {
       until: z.string().describe("ISO 8601 date to snooze until (e.g. 2026-03-21)"),
     },
     async ({ id, until }) => {
+      // Validate ISO date format
+      if (!/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(until) || isNaN(Date.parse(until))) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ error: "Invalid date format. Expected ISO 8601 date (e.g. 2026-03-21)" }),
+          }],
+          isError: true,
+        };
+      }
+
       const result = await query(
         `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
          WHERE id = $1 AND status != 'closed'
@@ -623,7 +633,7 @@ export function createMcpServer(): McpServer {
 
       const existing = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND review_state != 'rejected'`,
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND review_state != 'rejected'`,
         [entity.id, normalizedPredicate],
       );
 
@@ -742,7 +752,7 @@ export function createMcpServer(): McpServer {
 
       const conflicts = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
            AND (status = 'active' OR status = 'disputed') AND review_state != 'rejected'`,
         [f.entity_id, f.predicate, fact_id],
       );
@@ -777,7 +787,7 @@ export function createMcpServer(): McpServer {
       action: z.enum(["replace_existing_with_new", "mark_old_as_past", "mark_old_as_wrong", "keep_both_disputed"]).describe("How to resolve"),
       note: z.string().optional().describe("Optional note for audit trail"),
     },
-    async ({ fact_id, action }) => {
+    async ({ fact_id, action, note }) => {
       const newFact = await query(
         `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
         [fact_id],
@@ -793,12 +803,18 @@ export function createMcpServer(): McpServer {
           `UPDATE entity_facts SET review_state = 'accepted', updated_at = now() WHERE id = $1 AND review_state = 'pending'`,
           [fact_id],
         );
+        if (note) {
+          await query(
+            `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+            [fact_id, note],
+          );
+        }
         return { content: [{ type: "text" as const, text: `Kept both facts as disputed for "${f.canonical_name} — ${f.predicate}"` }] };
       }
 
       const oldFact = await query(
         `SELECT id, object_display_text FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
            AND status = 'disputed' AND review_state != 'rejected'
          LIMIT 1`,
         [f.entity_id, f.predicate, fact_id],
@@ -815,11 +831,23 @@ export function createMcpServer(): McpServer {
         case "mark_old_as_past":
           await query(`UPDATE entity_facts SET status = 'active', review_state = 'accepted', updated_at = now() WHERE id = $1`, [fact_id]);
           await query(`UPDATE entity_facts SET status = 'superseded', valid_at_end = now(), updated_at = now() WHERE id = $1`, [old.id]);
+          if (note) {
+            await query(
+              `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+              [fact_id, note],
+            );
+          }
           return { content: [{ type: "text" as const, text: `Resolved: "${f.object_display_text}" is now active, "${old.object_display_text}" superseded` }] };
 
         case "mark_old_as_wrong":
           await query(`UPDATE entity_facts SET status = 'active', review_state = 'accepted', updated_at = now() WHERE id = $1`, [fact_id]);
           await query(`UPDATE entity_facts SET review_state = 'rejected', updated_at = now() WHERE id = $1`, [old.id]);
+          if (note) {
+            await query(
+              `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+              [fact_id, note],
+            );
+          }
           return { content: [{ type: "text" as const, text: `Resolved: "${f.object_display_text}" is now active, "${old.object_display_text}" rejected` }] };
       }
     },

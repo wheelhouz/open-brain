@@ -26,4 +26,7 @@ COPY --from=web-build /web/dist ./static
 COPY db/init.sql ./init.sql
 COPY db/migrations ./migrations
 
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
 CMD ["node", "dist/index.js"]

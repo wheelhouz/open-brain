@@ -20,7 +20,7 @@ services:
     image: ${DOCKER_IMAGE:-ghcr.io/wheelhouz/open-brain:latest}
     restart: unless-stopped
     ports:
-      - "8420:8420"
+      - "127.0.0.1:8420:8420"
     environment:
       DATABASE_URL: postgresql://brain_app:${DB_PASSWORD}@db:5432/open_brain
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "../mcp.js";
-import { config } from "../config.js";
+import { validateAccessKey } from "../auth.js";
 
 export const mcpRouter = new Hono();
 
@@ -14,7 +14,7 @@ mcpRouter.all("/", async (c) => {
   const queryKey = c.req.query("key");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : queryKey;
 
-  if (!token || token !== config.brainAccessKey) {
+  if (!token || !validateAccessKey(token)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
