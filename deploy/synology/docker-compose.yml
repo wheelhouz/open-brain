@@ -54,7 +54,7 @@ services:
     command: --config.file=/config/prometheus.yml --storage.tsdb.path=/prometheus
     volumes:
       - monitoring_config:/config:ro
-      - prometheus_data:/prometheus
+      - /volume1/docker/open-brain/prometheus:/prometheus
     ports:
       - "9090:9090"
     depends_on:
@@ -71,7 +71,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_PATHS_PROVISIONING: /config/grafana/provisioning
     volumes:
-      - grafana_data:/var/lib/grafana
+      - /volume1/docker/open-brain/grafana:/var/lib/grafana
       - monitoring_config:/config:ro
     ports:
       - "3001:3000"
@@ -87,7 +87,7 @@ services:
     command: -config.file=/config/loki.yml
     volumes:
       - monitoring_config:/config:ro
-      - loki_data:/loki
+      - /volume1/docker/open-brain/loki:/loki
     depends_on:
       config-init:
         condition: service_completed_successfully
@@ -111,9 +111,6 @@ services:
 
 volumes:
   monitoring_config:
-  prometheus_data:
-  grafana_data:
-  loki_data:
 
 networks:
   brain-net:
