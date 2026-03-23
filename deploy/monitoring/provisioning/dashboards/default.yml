@@ -4,4 +4,4 @@ providers:
   - name: default
     type: file
     options:
-      path: /var/lib/grafana/dashboards
+      path: /config/grafana/dashboards

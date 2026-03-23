@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { isHealthy } from "./db.js";
 import { auth } from "./middleware/auth.js";
 import { requestLog } from "./middleware/requestLog.js";
+import { logger } from "./logger.js";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -45,7 +46,7 @@ app.use("*", requestLog);
 
 // Global error handler
 app.onError((err, c) => {
-  console.error("[app] Unhandled error:", err);
+  logger.error({ event: "unhandled_error", err: String(err), stack: err.stack });
   return c.json({ error: "Internal server error" }, 500);
 });
 

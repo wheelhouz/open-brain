@@ -21,6 +21,25 @@ services:
     networks: [brain-net]
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    networks: [brain-net]
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [brain-net]
+    restart: unless-stopped
+
   uptime-kuma:
     image: louislam/uptime-kuma:latest
     volumes:
@@ -33,6 +52,7 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  loki_data:
   uptime_data:
 
 networks:
