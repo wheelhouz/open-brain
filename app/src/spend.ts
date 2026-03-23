@@ -1,6 +1,7 @@
 import { query } from "./db.js";
 import { logger } from "./logger.js";
 import { config } from "./config.js";
+import { spendMonthToDate, budgetCutoffTotal } from "./metrics.js";
 
 // Per-1K-token pricing (update as needed)
 const MODEL_PRICING: Record<string, { prompt: number; completion: number }> = {
@@ -34,6 +35,7 @@ export async function recordUsage(event: UsageEvent): Promise<void> {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [event.operation, event.model, event.source, event.promptTokens, event.completionTokens, event.totalTokens, cost, event.latencyMs, event.success, event.errorCode || null],
     );
+    spendMonthToDate.inc(cost);
   } catch (err) {
     // Fire-and-forget: never throw from spend tracking
     logger.warn({ event: "spend_record_failed", err: String(err) });
@@ -70,6 +72,7 @@ export async function checkBudget(): Promise<void> {
 
   if (!ok) {
     logger.warn({ event: "budget_exceeded", monthToDate, cutoff: config.spendHardCutoffUsd });
+    budgetCutoffTotal.inc();
     throw new BudgetExceededError(monthToDate, config.spendHardCutoffUsd);
   }
 }

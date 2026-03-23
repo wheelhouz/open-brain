@@ -9,16 +9,23 @@ import { resolveEntityCandidates } from "./entities.js";
 import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
 import { logger } from "./logger.js";
 import pgvector from "pgvector";
+import { mcpToolCallsTotal, mcpToolDuration } from "./metrics.js";
 
 function withAudit<T, R>(tool: string, fn: (args: T) => Promise<R>) {
   return async (args: T): Promise<R> => {
     const start = Date.now();
     try {
       const result = await fn(args);
-      logger.info({ event: "mcp_tool_call", tool, latencyMs: Date.now() - start, success: true });
+      const latencyMs = Date.now() - start;
+      logger.info({ event: "mcp_tool_call", tool, latencyMs, success: true });
+      mcpToolCallsTotal.inc({ tool, status: "ok" });
+      mcpToolDuration.observe({ tool }, latencyMs);
       return result;
     } catch (err) {
-      logger.error({ event: "mcp_tool_call", tool, latencyMs: Date.now() - start, success: false, err: String(err) });
+      const latencyMs = Date.now() - start;
+      logger.error({ event: "mcp_tool_call", tool, latencyMs, success: false, err: String(err) });
+      mcpToolCallsTotal.inc({ tool, status: "error" });
+      mcpToolDuration.observe({ tool }, latencyMs);
       throw err;
     }
   };

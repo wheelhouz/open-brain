@@ -83,6 +83,14 @@ app.use("/mcp/*", async (c, next) => {
 });
 app.route("/mcp", mcpRouter);
 
+// Prometheus metrics — no auth (only reachable from Docker network)
+import { register } from "./metrics.js";
+
+app.get("/metrics", async (c) => {
+  c.header("Content-Type", register.contentType);
+  return c.text(await register.metrics());
+});
+
 // Health check — no auth required
 app.get("/health", async (c) => {
   const dbOk = await isHealthy();

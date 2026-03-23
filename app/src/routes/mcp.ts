@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createMcpServer } from "../mcp.js";
 import { validateAccessKey } from "../auth.js";
 import { logger } from "../logger.js";
+import { mcpSessionsCreatedTotal, mcpActiveSessions } from "../metrics.js";
 
 export const mcpRouter = new Hono();
 
@@ -69,9 +70,12 @@ mcpRouter.all("/", async (c) => {
     enableJsonResponse: true,
     onsessioninitialized: (id) => {
       sessions.set(id, { transport, createdAt: Date.now() });
+      mcpSessionsCreatedTotal.inc();
+      mcpActiveSessions.set(sessions.size);
     },
     onsessionclosed: (id) => {
       sessions.delete(id);
+      mcpActiveSessions.set(sessions.size);
     },
   });
 

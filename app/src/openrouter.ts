@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { recordUsage, checkBudget } from "./spend.js";
 import { logger } from "./logger.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { openrouterCallsTotal, tokensTotal, openrouterLatency } from "./metrics.js";
 
 export const sourceContext = new AsyncLocalStorage<string>();
 
@@ -26,6 +27,8 @@ export async function openrouterRequest(path: string, body: unknown, operation =
   if (!res.ok) {
     await res.text();
     const latencyMs = Date.now() - start;
+    openrouterCallsTotal.inc({ operation, model, status: "error", source });
+    openrouterLatency.observe({ operation }, latencyMs);
     void recordUsage({ operation, model, source, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs, success: false, errorCode: String(res.status) });
     throw new Error(`OpenRouter ${path} failed (${res.status})`);
   }
@@ -34,6 +37,12 @@ export async function openrouterRequest(path: string, body: unknown, operation =
   const latencyMs = Date.now() - start;
 
   const usage = (data as Record<string, unknown>).usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+  openrouterCallsTotal.inc({ operation, model, status: "ok", source });
+  openrouterLatency.observe({ operation }, latencyMs);
+  if (usage) {
+    if (usage.prompt_tokens) tokensTotal.inc({ operation, model, type: "prompt", source }, usage.prompt_tokens);
+    if (usage.completion_tokens) tokensTotal.inc({ operation, model, type: "completion", source }, usage.completion_tokens);
+  }
   void recordUsage({
     operation,
     model,
