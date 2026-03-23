@@ -109,22 +109,11 @@ services:
       - brain-net
     restart: unless-stopped
 
-  uptime-kuma:
-    image: louislam/uptime-kuma:latest
-    volumes:
-      - uptime_data:/app/data
-    ports:
-      - "3002:3001"
-    networks:
-      - brain-net
-    restart: unless-stopped
-
 volumes:
   monitoring_config:
   prometheus_data:
   grafana_data:
   loki_data:
-  uptime_data:
 
 networks:
   brain-net:
