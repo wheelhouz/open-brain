@@ -1,4 +1,12 @@
 services:
+  # --- Config init: copies monitoring configs from image to shared volume ---
+  config-init:
+    image: ${CONFIG_IMAGE:-ghcr.io/wheelhouz/open-brain-config:latest}
+    volumes:
+      - monitoring_config:/out
+    restart: "no"
+
+  # --- Core services ---
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -40,13 +48,18 @@ services:
     networks:
       - brain-net
 
+  # --- Monitoring services ---
   prometheus:
     image: prom/prometheus:latest
+    command: --config.file=/config/prometheus.yml --storage.tsdb.path=/prometheus
     volumes:
-      - /volume1/docker/open-brain/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - monitoring_config:/config:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
@@ -56,33 +69,42 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PATHS_PROVISIONING: /config/grafana/provisioning
     volumes:
       - grafana_data:/var/lib/grafana
-      - /volume1/docker/open-brain/grafana/provisioning:/etc/grafana/provisioning:ro
-      - /volume1/docker/open-brain/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - monitoring_config:/config:ro
     ports:
       - "3001:3000"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
 
   loki:
     image: grafana/loki:latest
-    command: -config.file=/etc/loki/loki.yml
+    command: -config.file=/config/loki.yml
     volumes:
-      - /volume1/docker/open-brain/loki.yml:/etc/loki/loki.yml:ro
+      - monitoring_config:/config:ro
       - loki_data:/loki
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
 
   promtail:
     image: grafana/promtail:latest
-    command: -config.file=/etc/promtail/promtail.yml
+    command: -config.file=/config/promtail.yml
     volumes:
-      - /volume1/docker/open-brain/promtail.yml:/etc/promtail/promtail.yml:ro
+      - monitoring_config:/config:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
@@ -98,6 +120,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  monitoring_config:
   prometheus_data:
   grafana_data:
   loki_data:

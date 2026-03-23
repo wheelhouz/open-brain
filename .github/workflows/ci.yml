@@ -7,7 +7,6 @@ on:
       - '*.md'
       - 'docs/**'
       - 'LICENSE'
-      - 'deploy/**'
     tags:
       - 'v*'
   pull_request:
@@ -16,7 +15,6 @@ on:
       - '*.md'
       - 'docs/**'
       - 'LICENSE'
-      - 'deploy/**'
 
 jobs:
   test:
@@ -50,18 +48,30 @@ jobs:
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           TAGS="ghcr.io/wheelhouz/open-brain:sha-${SHA},ghcr.io/wheelhouz/open-brain:latest"
+          CONFIG_TAGS="ghcr.io/wheelhouz/open-brain-config:sha-${SHA},ghcr.io/wheelhouz/open-brain-config:latest"
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
             TAGS="${TAGS},ghcr.io/wheelhouz/open-brain:${VERSION}"
+            CONFIG_TAGS="${CONFIG_TAGS},ghcr.io/wheelhouz/open-brain-config:${VERSION}"
             echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "config_tags=${CONFIG_TAGS}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - name: Build and push app image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+
+      - name: Build and push config image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.config
+          push: true
+          tags: ${{ steps.tags.outputs.config_tags }}
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
