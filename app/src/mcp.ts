@@ -3,10 +3,33 @@ import { z } from "zod";
 import { query } from "./db.js";
 import { chatCompletion, generateEmbedding } from "./openrouter.js";
 import { capturePipeline } from "./pipeline.js";
+import { config } from "./config.js";
 import { searchWithReranking, searchMemory } from "./rag.js";
 import { resolveEntityCandidates } from "./entities.js";
 import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
+import { logger } from "./logger.js";
 import pgvector from "pgvector";
+import { mcpToolCallsTotal, mcpToolDuration } from "./metrics.js";
+
+function withAudit<T, R>(tool: string, fn: (args: T) => Promise<R>) {
+  return async (args: T): Promise<R> => {
+    const start = Date.now();
+    try {
+      const result = await fn(args);
+      const latencyMs = Date.now() - start;
+      logger.info({ event: "mcp_tool_call", tool, latencyMs, success: true });
+      mcpToolCallsTotal.inc({ tool, status: "ok" });
+      mcpToolDuration.observe({ tool }, latencyMs);
+      return result;
+    } catch (err) {
+      const latencyMs = Date.now() - start;
+      logger.error({ event: "mcp_tool_call", tool, latencyMs, success: false, err: String(err) });
+      mcpToolCallsTotal.inc({ tool, status: "error" });
+      mcpToolDuration.observe({ tool }, latencyMs);
+      throw err;
+    }
+  };
+}
 
 export function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -21,7 +44,7 @@ export function createMcpServer(): McpServer {
     {
       id: z.string().describe("The thought UUID"),
     },
-    async ({ id }) => {
+    withAudit("get_thought", async ({ id }) => {
       const result = await query(
         `SELECT id, content, metadata, created_at FROM thoughts WHERE id = $1 AND deleted_at IS NULL`,
         [id],
@@ -36,7 +59,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
       };
-    },
+    }),
   );
 
   // search_thoughts
@@ -50,7 +73,7 @@ export function createMcpServer(): McpServer {
       filter: z.record(z.string(), z.unknown()).default({}).describe("Metadata filter, e.g. {people: ['Liz']}"),
       time_hint: z.enum(["recent", "last_month", "older"]).optional().describe("Temporal bias for reranking"),
     },
-    async ({ query: searchQuery, limit, threshold, filter, time_hint }) => {
+    withAudit("search_thoughts", async ({ query: searchQuery, limit, threshold, filter, time_hint }) => {
       const result = await searchWithReranking({
         query: searchQuery,
         limit: Math.min(limit, 100),
@@ -67,7 +90,7 @@ export function createMcpServer(): McpServer {
           },
         ],
       };
-    },
+    }),
   );
 
   // search_memory — broker-backed mixed retrieval
@@ -82,7 +105,7 @@ export function createMcpServer(): McpServer {
       entity_names: z.array(z.string()).optional().describe("Person names to scope retrieval — resolves to canonical entities for provenance-based loop recall"),
       prefer_open_loops: z.boolean().optional().describe("When true, boosts retrieval of open action items and enables provenance-based loop recall for resolved entities"),
     },
-    async ({ query: searchQuery, limit, filter, time_hint, entity_names, prefer_open_loops }) => {
+    withAudit("search_memory", async ({ query: searchQuery, limit, filter, time_hint, entity_names, prefer_open_loops }) => {
       // Resolve entity names to IDs if provided
       let entityIds: string[] | undefined;
       if (entity_names && entity_names.length > 0) {
@@ -104,7 +127,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.candidates, null, 2) }],
       };
-    },
+    }),
   );
 
   // list_thoughts
@@ -118,7 +141,7 @@ export function createMcpServer(): McpServer {
       person: z.string().optional().describe("Filter by mentioned person"),
       days: z.number().optional().describe("Only thoughts from last N days"),
     },
-    async ({ limit, type, topic, person, days }) => {
+    withAudit("list_thoughts", async ({ limit, type, topic, person, days }) => {
       const conditions: string[] = ["deleted_at IS NULL"];
       const params: unknown[] = [];
       let idx = 1;
@@ -165,7 +188,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
       };
-    },
+    }),
   );
 
   // thought_stats
@@ -173,7 +196,7 @@ export function createMcpServer(): McpServer {
     "thought_stats",
     "Get aggregate statistics about captured thoughts.",
     {},
-    async () => {
+    withAudit("thought_stats", async () => {
       const [totalResult, typeResult, topicsResult, peopleResult] = await Promise.all([
         query<{ count: string }>(`SELECT count(*) FROM thoughts WHERE deleted_at IS NULL`),
         query<{ type: string; count: string }>(
@@ -207,7 +230,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(stats, null, 2) }],
       };
-    },
+    }),
   );
 
   // capture_thought
@@ -218,12 +241,18 @@ export function createMcpServer(): McpServer {
       content: z.string().describe("The thought to capture"),
       parent_id: z.string().optional().describe("Parent thought ID to link as sub-thought"),
     },
-    async ({ content, parent_id }) => {
+    withAudit("capture_thought", async ({ content, parent_id }) => {
+      if (content.length > config.maxContentLength) {
+        return {
+          content: [{ type: "text" as const, text: `Content exceeds maximum length of ${config.maxContentLength} bytes.` }],
+          isError: true,
+        };
+      }
       const result = await capturePipeline(content, "mcp", parent_id);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
-    },
+    }),
   );
 
   // add_note
@@ -234,7 +263,20 @@ export function createMcpServer(): McpServer {
       thought_id: z.string().describe("The parent thought ID to attach the note to"),
       content: z.string().describe("The note content to save"),
     },
-    async ({ thought_id, content }) => {
+    withAudit("add_note", async ({ thought_id, content }) => {
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_RE.test(thought_id)) {
+        return {
+          content: [{ type: "text" as const, text: "Invalid thought_id: must be a valid UUID." }],
+          isError: true,
+        };
+      }
+      if (content.length > config.maxContentLength) {
+        return {
+          content: [{ type: "text" as const, text: `Content exceeds maximum length of ${config.maxContentLength} bytes.` }],
+          isError: true,
+        };
+      }
       const parent = await query(
         `SELECT id FROM thoughts WHERE id = $1 AND deleted_at IS NULL`,
         [thought_id],
@@ -248,7 +290,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
-    },
+    }),
   );
 
   // bulk_import
@@ -257,10 +299,15 @@ export function createMcpServer(): McpServer {
     "Import multiple thoughts at once. Used for migrating from other knowledge systems.",
     {
       thoughts: z.array(z.string()).describe("Array of thought content strings to import"),
-      normalize: z.boolean().default(true).describe("Rewrite each thought to be self-contained"),
       source_label: z.string().optional().describe("Origin system label"),
     },
-    async ({ thoughts, normalize, source_label }) => {
+    withAudit("bulk_import", async ({ thoughts, source_label }) => {
+      if (thoughts.length > 100) {
+        return {
+          content: [{ type: "text" as const, text: "Too many thoughts (max 100)." }],
+          isError: true,
+        };
+      }
       let imported = 0;
       let failed = 0;
 
@@ -281,7 +328,7 @@ export function createMcpServer(): McpServer {
           },
         ],
       };
-    },
+    }),
   );
 
   // weekly_review
@@ -291,7 +338,8 @@ export function createMcpServer(): McpServer {
     {
       days: z.number().default(7).describe("Number of days to review"),
     },
-    async ({ days }) => {
+    withAudit("weekly_review", async ({ days: rawDays }) => {
+      const days = Math.min(rawDays, 90);
       const [thoughtsResult, loopsResult, peopleResult] = await Promise.all([
         query<{
           id: string;
@@ -302,7 +350,8 @@ export function createMcpServer(): McpServer {
           `SELECT id, content, metadata, created_at
            FROM thoughts
            WHERE deleted_at IS NULL AND created_at > now() - interval '1 day' * $1
-           ORDER BY created_at DESC`,
+           ORDER BY created_at DESC
+           LIMIT 500`,
           [days],
         ),
         query<{ content: string; loop_type: string; created_at: string }>(
@@ -346,12 +395,13 @@ export function createMcpServer(): McpServer {
       const review = await chatCompletion(
         `You are a personal knowledge assistant. Analyze the following thoughts captured over the last ${days} days and provide a structured weekly review with: 1) Key themes, 2) Open action items, 3) Most mentioned people, 4) Suggested focus areas for next week.`,
         thoughtsSummary + loopsSummary + peopleSummary,
+        "weekly_review",
       );
 
       return {
         content: [{ type: "text" as const, text: review }],
       };
-    },
+    }),
   );
 
   // list_open_loops
@@ -363,7 +413,7 @@ export function createMcpServer(): McpServer {
       loop_type: z.enum(["task", "question", "decision", "waiting_on"]).optional().describe("Filter by loop type"),
       limit: z.number().default(20).describe("Max results"),
     },
-    async ({ status, loop_type, limit }) => {
+    withAudit("list_open_loops", async ({ status, loop_type, limit }) => {
       const conditions: string[] = [];
       const params: unknown[] = [];
       let idx = 1;
@@ -394,7 +444,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
       };
-    },
+    }),
   );
 
   // close_loop
@@ -405,7 +455,7 @@ export function createMcpServer(): McpServer {
       id: z.string().describe("The loop UUID"),
       resolution: z.string().optional().describe("Resolution text — answer, rationale, or closing note"),
     },
-    async ({ id, resolution }) => {
+    withAudit("close_loop", async ({ id, resolution }) => {
       const result = await query(
         `UPDATE open_loops SET status = 'closed', closed_at = now(), resolution = $2
          WHERE id = $1 AND status != 'closed'
@@ -422,7 +472,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
       };
-    },
+    }),
   );
 
   // snooze_loop
@@ -433,7 +483,18 @@ export function createMcpServer(): McpServer {
       id: z.string().describe("The loop UUID"),
       until: z.string().describe("ISO 8601 date to snooze until (e.g. 2026-03-21)"),
     },
-    async ({ id, until }) => {
+    withAudit("snooze_loop", async ({ id, until }) => {
+      // Validate ISO date format
+      if (!/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(until) || isNaN(Date.parse(until))) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({ error: "Invalid date format. Expected ISO 8601 date (e.g. 2026-03-21)" }),
+          }],
+          isError: true,
+        };
+      }
+
       const result = await query(
         `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
          WHERE id = $1 AND status != 'closed'
@@ -450,7 +511,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
       };
-    },
+    }),
   );
 
   // get_entity
@@ -460,7 +521,7 @@ export function createMcpServer(): McpServer {
     {
       name: z.string().describe("Person name to search for (checks canonical name and aliases)"),
     },
-    async ({ name }) => {
+    withAudit("get_entity", async ({ name }) => {
       const result = await query(
         `SELECT e.id, e.canonical_name, e.entity_type, e.aliases, e.attributes,
                 count(em.thought_id) as mention_count
@@ -482,7 +543,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
       };
-    },
+    }),
   );
 
   // list_entity_mentions
@@ -493,7 +554,7 @@ export function createMcpServer(): McpServer {
       entity_id: z.string().describe("The entity UUID"),
       limit: z.number().default(10).describe("Max results"),
     },
-    async ({ entity_id, limit }) => {
+    withAudit("list_entity_mentions", async ({ entity_id, limit }) => {
       const result = await query(
         `SELECT t.id, t.content, t.metadata, t.created_at
          FROM entity_mentions em
@@ -507,7 +568,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
       };
-    },
+    }),
   );
 
   // list_entity_facts
@@ -522,7 +583,7 @@ export function createMcpServer(): McpServer {
       include_evidence: z.boolean().optional().default(false).describe("Include supporting evidence for each fact"),
       limit: z.number().optional().default(20).describe("Maximum facts to return"),
     },
-    async ({ entity_name, entity_id, status, review_state, include_evidence, limit }) => {
+    withAudit("list_entity_facts", async ({ entity_name, entity_id, status, review_state, include_evidence, limit }) => {
       let resolvedId = entity_id;
       if (!resolvedId && entity_name) {
         const entityResult = await query(
@@ -580,7 +641,7 @@ export function createMcpServer(): McpServer {
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
-    },
+    }),
   );
 
   // add_entity_fact
@@ -596,7 +657,7 @@ export function createMcpServer(): McpServer {
       confidence: z.number().optional().describe("Confidence 0.0-1.0"),
       note: z.string().optional().describe("Optional context note"),
     },
-    async ({ entity_name, predicate, value, display_text, source_kind, confidence, note }) => {
+    withAudit("add_entity_fact", async ({ entity_name, predicate, value, display_text, source_kind, confidence, note }) => {
       const entityResult = await query(
         `SELECT id, canonical_name FROM entities WHERE (lower(canonical_name) = lower($1) OR $1 ILIKE ANY(aliases)) AND entity_type = 'person'`,
         [entity_name],
@@ -623,7 +684,7 @@ export function createMcpServer(): McpServer {
 
       const existing = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND review_state != 'rejected'`,
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND review_state != 'rejected'`,
         [entity.id, normalizedPredicate],
       );
 
@@ -645,7 +706,7 @@ export function createMcpServer(): McpServer {
       );
 
       const embeddingText = renderFactEmbeddingText(entity.canonical_name, normalizedPredicate, displayText);
-      const embedding = await generateEmbedding(embeddingText);
+      const embedding = await generateEmbedding(embeddingText, "embed_fact");
 
       if (conflict) {
         // Create as disputed and mark existing as disputed too
@@ -703,7 +764,7 @@ export function createMcpServer(): McpServer {
           text: `Added fact: ${entity.canonical_name} — ${normalizedPredicate} — ${displayText} (${status}/${reviewState})`,
         }],
       };
-    },
+    }),
   );
 
   // review_entity_fact
@@ -715,7 +776,7 @@ export function createMcpServer(): McpServer {
       action: z.enum(["accept", "reject"]).describe("Accept or reject the fact"),
       note: z.string().optional().describe("Optional note for audit trail"),
     },
-    async ({ fact_id, action, note }) => {
+    withAudit("review_entity_fact", async ({ fact_id, action, note }) => {
       const fact = await query(
         `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
         [fact_id],
@@ -742,7 +803,7 @@ export function createMcpServer(): McpServer {
 
       const conflicts = await query(
         `SELECT id, predicate, object_display_text, status FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
            AND (status = 'active' OR status = 'disputed') AND review_state != 'rejected'`,
         [f.entity_id, f.predicate, fact_id],
       );
@@ -765,7 +826,7 @@ export function createMcpServer(): McpServer {
         );
       }
       return { content: [{ type: "text" as const, text: `Accepted: ${f.canonical_name} — ${f.predicate} — ${f.object_display_text}` }] };
-    },
+    }),
   );
 
   // resolve_fact_conflict
@@ -777,7 +838,7 @@ export function createMcpServer(): McpServer {
       action: z.enum(["replace_existing_with_new", "mark_old_as_past", "mark_old_as_wrong", "keep_both_disputed"]).describe("How to resolve"),
       note: z.string().optional().describe("Optional note for audit trail"),
     },
-    async ({ fact_id, action }) => {
+    withAudit("resolve_fact_conflict", async ({ fact_id, action, note }) => {
       const newFact = await query(
         `SELECT ef.id, ef.entity_id, ef.predicate, ef.object_value_json, ef.object_display_text, ef.status, ef.review_state, ef.confidence, ef.source_kind, ef.valid_at_start, ef.valid_at_end, ef.created_at, ef.updated_at, e.canonical_name FROM entity_facts ef JOIN entities e ON e.id = ef.entity_id WHERE ef.id = $1`,
         [fact_id],
@@ -793,12 +854,18 @@ export function createMcpServer(): McpServer {
           `UPDATE entity_facts SET review_state = 'accepted', updated_at = now() WHERE id = $1 AND review_state = 'pending'`,
           [fact_id],
         );
+        if (note) {
+          await query(
+            `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+            [fact_id, note],
+          );
+        }
         return { content: [{ type: "text" as const, text: `Kept both facts as disputed for "${f.canonical_name} — ${f.predicate}"` }] };
       }
 
       const oldFact = await query(
         `SELECT id, object_display_text FROM entity_facts
-         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+         WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
            AND status = 'disputed' AND review_state != 'rejected'
          LIMIT 1`,
         [f.entity_id, f.predicate, fact_id],
@@ -815,14 +882,26 @@ export function createMcpServer(): McpServer {
         case "mark_old_as_past":
           await query(`UPDATE entity_facts SET status = 'active', review_state = 'accepted', updated_at = now() WHERE id = $1`, [fact_id]);
           await query(`UPDATE entity_facts SET status = 'superseded', valid_at_end = now(), updated_at = now() WHERE id = $1`, [old.id]);
+          if (note) {
+            await query(
+              `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+              [fact_id, note],
+            );
+          }
           return { content: [{ type: "text" as const, text: `Resolved: "${f.object_display_text}" is now active, "${old.object_display_text}" superseded` }] };
 
         case "mark_old_as_wrong":
           await query(`UPDATE entity_facts SET status = 'active', review_state = 'accepted', updated_at = now() WHERE id = $1`, [fact_id]);
           await query(`UPDATE entity_facts SET review_state = 'rejected', updated_at = now() WHERE id = $1`, [old.id]);
+          if (note) {
+            await query(
+              `INSERT INTO entity_fact_evidence (fact_id, excerpt, evidence_type) VALUES ($1, $2, 'manual')`,
+              [fact_id, note],
+            );
+          }
           return { content: [{ type: "text" as const, text: `Resolved: "${f.object_display_text}" is now active, "${old.object_display_text}" rejected` }] };
       }
-    },
+    }),
   );
 
   return server;

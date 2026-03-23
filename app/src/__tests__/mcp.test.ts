@@ -9,15 +9,19 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
-  extractMetadata: vi.fn().mockResolvedValue({
-    type: "observation", topics: [], people: [],
-    action_items: [], dates_mentioned: [], source_context: null,
-  }),
-  chatCompletion: vi.fn().mockResolvedValue("Summary"),
-  normalizeContent: vi.fn().mockImplementation((c: string) => Promise.resolve(c)),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
+    extractMetadata: vi.fn().mockResolvedValue({
+      type: "observation", topics: [], people: [],
+      action_items: [], dates_mentioned: [], source_context: null,
+    }),
+    chatCompletion: vi.fn().mockResolvedValue("Summary"),
+    normalizeContent: vi.fn().mockImplementation((c: string) => Promise.resolve(c)),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },

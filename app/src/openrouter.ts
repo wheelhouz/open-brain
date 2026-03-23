@@ -1,8 +1,20 @@
 import { config } from "./config.js";
+import { recordUsage, checkBudget } from "./spend.js";
+import { logger } from "./logger.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { openrouterCallsTotal, tokensTotal, openrouterLatency } from "./metrics.js";
+
+export const sourceContext = new AsyncLocalStorage<string>();
 
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 
-export async function openrouterRequest(path: string, body: unknown): Promise<unknown> {
+export async function openrouterRequest(path: string, body: unknown, operation = "unknown"): Promise<unknown> {
+  await checkBudget();
+
+  const start = Date.now();
+  const model = (body as Record<string, unknown>).model as string || "unknown";
+  const source = sourceContext.getStore() || "rest";
+
   const res = await fetch(`${OPENROUTER_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -13,18 +25,43 @@ export async function openrouterRequest(path: string, body: unknown): Promise<un
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenRouter ${path} failed (${res.status}): ${text}`);
+    await res.text();
+    const latencyMs = Date.now() - start;
+    openrouterCallsTotal.inc({ operation, model, status: "error", source });
+    openrouterLatency.observe({ operation }, latencyMs);
+    void recordUsage({ operation, model, source, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs, success: false, errorCode: String(res.status) });
+    throw new Error(`OpenRouter ${path} failed (${res.status})`);
   }
 
-  return res.json();
+  const data = await res.json();
+  const latencyMs = Date.now() - start;
+
+  const usage = (data as Record<string, unknown>).usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+  openrouterCallsTotal.inc({ operation, model, status: "ok", source });
+  openrouterLatency.observe({ operation }, latencyMs);
+  if (usage) {
+    if (usage.prompt_tokens) tokensTotal.inc({ operation, model, type: "prompt", source }, usage.prompt_tokens);
+    if (usage.completion_tokens) tokensTotal.inc({ operation, model, type: "completion", source }, usage.completion_tokens);
+  }
+  void recordUsage({
+    operation,
+    model,
+    source,
+    promptTokens: usage?.prompt_tokens || 0,
+    completionTokens: usage?.completion_tokens || 0,
+    totalTokens: usage?.total_tokens || 0,
+    latencyMs,
+    success: true,
+  });
+
+  return data;
 }
 
-export async function generateEmbedding(text: string): Promise<number[]> {
+export async function generateEmbedding(text: string, operation = "embed_search"): Promise<number[]> {
   const data = (await openrouterRequest("/embeddings", {
     model: config.embeddingModel,
     input: text,
-  })) as { data: Array<{ embedding: number[] }> };
+  }, operation)) as { data: Array<{ embedding: number[] }> };
 
   return data.data[0].embedding;
 }
@@ -100,19 +137,19 @@ const NORMALIZATION_PROMPT = `Rewrite the following note as a standalone stateme
 
 Note: `;
 
-export async function normalizeContent(content: string): Promise<string> {
+export async function normalizeContent(content: string, operation = "normalize"): Promise<string> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
     messages: [
       { role: "user", content: NORMALIZATION_PROMPT + content },
     ],
     temperature: 0,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   return data.choices[0].message.content.trim();
 }
 
-export async function chatCompletion(systemPrompt: string, userContent: string): Promise<string> {
+export async function chatCompletion(systemPrompt: string, userContent: string, operation = "unknown"): Promise<string> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
     messages: [
@@ -120,7 +157,7 @@ export async function chatCompletion(systemPrompt: string, userContent: string):
       { role: "user", content: userContent },
     ],
     temperature: 0.3,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   return data.choices[0].message.content.trim();
 }
@@ -133,9 +170,16 @@ export interface ChatMessage {
 export function chatCompletionStream(
   messages: ChatMessage[],
   model?: string,
+  operation = "chat_stream",
 ): ReadableStream<string> {
   return new ReadableStream({
     async start(controller) {
+      await checkBudget();
+
+      const start = Date.now();
+      const effectiveModel = model || config.chatModel;
+      const source = sourceContext.getStore() || "rest";
+
       const res = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
         method: "POST",
         headers: {
@@ -143,7 +187,7 @@ export function chatCompletionStream(
           Authorization: `Bearer ${config.openrouterApiKey}`,
         },
         body: JSON.stringify({
-          model: model || config.chatModel,
+          model: effectiveModel,
           messages,
           stream: true,
           temperature: 0.5,
@@ -151,8 +195,10 @@ export function chatCompletionStream(
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        controller.enqueue(`Error: OpenRouter returned ${res.status}: ${text}`);
+        await res.text();
+        const latencyMs = Date.now() - start;
+        void recordUsage({ operation, model: effectiveModel, source, promptTokens: 0, completionTokens: 0, totalTokens: 0, latencyMs, success: false, errorCode: String(res.status) });
+        controller.enqueue(`Error: OpenRouter returned ${res.status}`);
         controller.close();
         return;
       }
@@ -160,6 +206,7 @@ export function chatCompletionStream(
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let lastUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -179,11 +226,24 @@ export function chatCompletionStream(
             const parsed = JSON.parse(data);
             const delta = parsed.choices?.[0]?.delta?.content;
             if (delta) controller.enqueue(delta);
+            if (parsed.usage) lastUsage = parsed.usage;
           } catch {
             // skip malformed chunks
           }
         }
       }
+
+      const latencyMs = Date.now() - start;
+      void recordUsage({
+        operation,
+        model: effectiveModel,
+        source,
+        promptTokens: lastUsage?.prompt_tokens || 0,
+        completionTokens: lastUsage?.completion_tokens || 0,
+        totalTokens: lastUsage?.total_tokens || 0,
+        latencyMs,
+        success: true,
+      });
 
       controller.close();
     },
@@ -225,6 +285,7 @@ Rules:
 
 export async function rewriteQuery(
   messages: Array<{ role: string; content: string }>,
+  operation = "rewrite_query",
 ): Promise<QueryRewrite> {
   const last5 = messages.slice(-5);
   const lastUserMsg = [...last5].reverse().find((m) => m.role === "user");
@@ -247,7 +308,7 @@ export async function rewriteQuery(
       ],
       response_format: { type: "json_object" },
       temperature: 0,
-    })) as { choices: Array<{ message: { content: string } }> };
+    }, operation)) as { choices: Array<{ message: { content: string } }> };
 
     const raw = JSON.parse(data.choices[0].message.content);
     const validIntentTypes = ["informational", "task", "person-summary", "person-recency", "status", "follow-up", "decision"];
@@ -279,6 +340,7 @@ function matchTopics(aiTopics: string[], inputLookup: Map<string, string>): stri
 
 export async function categorizeTopics(
   topics: string[],
+  operation = "categorize_topics",
 ): Promise<{ name: string; topics: string[] }[]> {
   const inputLookup = buildInputLookup(topics);
 
@@ -292,7 +354,7 @@ export async function categorizeTopics(
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   const raw = JSON.parse(data.choices[0].message.content);
   return Array.isArray(raw.categories)
@@ -312,6 +374,7 @@ export async function categorizeTopics(
 export async function categorizeMissing(
   topics: string[],
   existingCategories: string[],
+  operation = "categorize_topics",
 ): Promise<{ name: string; topics: string[] }[]> {
   const inputLookup = buildInputLookup(topics);
 
@@ -325,7 +388,7 @@ export async function categorizeMissing(
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   const raw = JSON.parse(data.choices[0].message.content);
   return Array.isArray(raw.categories)
@@ -345,6 +408,7 @@ export async function categorizeMissing(
 export async function assignCategory(
   topic: string,
   existingCategories: string[],
+  operation = "assign_category",
 ): Promise<string> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
@@ -356,13 +420,13 @@ export async function assignCategory(
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   const raw = JSON.parse(data.choices[0].message.content);
   return typeof raw.category === "string" ? raw.category : "Uncategorized";
 }
 
-export async function extractMetadata(content: string): Promise<ThoughtMetadata> {
+export async function extractMetadata(content: string, operation = "extract_metadata"): Promise<ThoughtMetadata> {
   const data = (await openrouterRequest("/chat/completions", {
     model: config.extractionModel,
     messages: [
@@ -373,7 +437,7 @@ export async function extractMetadata(content: string): Promise<ThoughtMetadata>
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  })) as { choices: Array<{ message: { content: string } }> };
+  }, operation)) as { choices: Array<{ message: { content: string } }> };
 
   const raw = JSON.parse(data.choices[0].message.content);
 

@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+vi.mock("../spend.js", () => ({
+  recordUsage: vi.fn(),
+  checkBudget: vi.fn(),
+}));
+
 import { generateEmbedding, extractMetadata } from "../openrouter.js";
 
 const mockFetch = vi.fn();

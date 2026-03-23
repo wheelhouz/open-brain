@@ -5,6 +5,8 @@ import { resolveEntityMentions, type MentionResolution } from "./entities.js";
 import { processFactCandidates } from "./facts.js";
 import pgvector from "pgvector";
 import { config } from "./config.js";
+import { logger } from "./logger.js";
+import { capturesTotal } from "./metrics.js";
 
 export async function createLoopsFromActionItems(
   actionItems: Array<{ content: string; loop_type: string } | string>,
@@ -53,8 +55,8 @@ export async function createLoopsFromActionItems(
         const { enqueueEmbeddingJob, triggerWorker } = await import("./queue.js");
         await enqueueEmbeddingJob(loopId, config.embeddingModel);
         triggerWorker();
-      } catch {
-        // Don't fail loop creation if embedding enqueue fails
+      } catch (err) {
+        logger.warn({ event: "pipeline_enrichment_failed", step: "loop_embedding_enqueue", err: String(err) });
       }
     }
   }
@@ -73,15 +75,18 @@ export async function capturePipeline(
 ): Promise<CaptureResult> {
   // Run embedding + metadata extraction in parallel
   const [embedding, metadata] = await Promise.all([
-    generateEmbedding(content),
-    extractMetadata(content).catch(() => ({
-      type: "observation" as const,
-      topics: [] as string[],
-      people: [] as string[],
-      action_items: [] as { content: string; loop_type: "task" | "question" | "decision" | "waiting_on" }[],
-      dates_mentioned: [] as string[],
-      source_context: source || null,
-    })),
+    generateEmbedding(content, "embed_thought"),
+    extractMetadata(content).catch((err) => {
+      logger.warn({ event: "pipeline_enrichment_failed", step: "extract_metadata", err: String(err) });
+      return {
+        type: "observation" as const,
+        topics: [] as string[],
+        people: [] as string[],
+        action_items: [] as { content: string; loop_type: "task" | "question" | "decision" | "waiting_on" }[],
+        dates_mentioned: [] as string[],
+        source_context: source || null,
+      };
+    }),
   ]);
 
   // Override source_context if explicitly provided
@@ -100,6 +105,9 @@ export async function capturePipeline(
      RETURNING id, created_at`,
     [content, pgvector.toSql(embedding), JSON.stringify(metadataWithHash), parentId || null, config.embeddingModel, new Date().toISOString()],
   );
+
+  const thoughtId = result.rows[0].id;
+  capturesTotal.inc({ status: "ok", source: source || "unknown" });
 
   // Auto-categorize new topics (best-effort, don't block capture)
   if (metadata.topics.length > 0) {
@@ -128,18 +136,17 @@ export async function capturePipeline(
           }
         }
       }
-    } catch {
-      // Don't fail capture if categorization fails
+    } catch (err) {
+      logger.warn({ event: "pipeline_enrichment_failed", step: "category_assignment", thoughtId, err: String(err) });
     }
   }
 
   // Create open loops from action items (best-effort)
-  const thoughtId = result.rows[0].id;
   if (action_items.length > 0) {
     try {
       await createLoopsFromActionItems(action_items, thoughtId);
-    } catch {
-      // Don't fail capture if loop creation fails
+    } catch (err) {
+      logger.warn({ event: "pipeline_enrichment_failed", step: "loop_creation", thoughtId, err: String(err) });
     }
   }
 
@@ -148,8 +155,8 @@ export async function capturePipeline(
   if (metadata.people.length > 0) {
     try {
       mentionMap = await resolveEntityMentions(metadata.people, thoughtId);
-    } catch {
-      // Don't fail capture if entity resolution fails
+    } catch (err) {
+      logger.warn({ event: "pipeline_enrichment_failed", step: "entity_resolution", thoughtId, err: String(err) });
     }
   }
 
@@ -158,10 +165,19 @@ export async function capturePipeline(
   if (factCandidates && factCandidates.length > 0 && mentionMap.length > 0) {
     try {
       await processFactCandidates(factCandidates, thoughtId, mentionMap, content);
-    } catch {
-      // Don't fail capture if fact processing fails
+    } catch (err) {
+      logger.warn({ event: "pipeline_enrichment_failed", step: "fact_processing", thoughtId, err: String(err) });
     }
   }
+
+  logger.info({
+    event: "capture_result",
+    thoughtId,
+    metadata: !!metadata.type,
+    loops: action_items.length > 0,
+    entities: mentionMap.length > 0,
+    facts: !!(factCandidates && factCandidates.length > 0),
+  });
 
   return {
     id: thoughtId,
@@ -184,8 +200,11 @@ export async function updatePipeline(
 
   if (reprocess) {
     const [embedding, metadata] = await Promise.all([
-      generateEmbedding(content),
-      extractMetadata(content).catch(() => null),
+      generateEmbedding(content, "embed_thought"),
+      extractMetadata(content).catch((err) => {
+        logger.warn({ event: "pipeline_enrichment_failed", step: "extract_metadata_update", err: String(err) });
+        return null;
+      }),
     ]);
     return { embedding, metadata, content_hash: contentHash };
   }

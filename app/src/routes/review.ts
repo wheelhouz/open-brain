@@ -5,7 +5,7 @@ import { chatCompletion } from "../openrouter.js";
 export const reviewRouter = new Hono();
 
 reviewRouter.get("/", async (c) => {
-  const days = parseInt(c.req.query("days") || "7", 10);
+  const days = Math.min(parseInt(c.req.query("days") || "7", 10), 365);
 
   // Get all thoughts from the period
   const result = await query<{
@@ -95,6 +95,7 @@ reviewRouter.get("/", async (c) => {
         const summary = await chatCompletion(
           "Summarize the following thoughts about this topic in 1-2 sentences. Be concise.",
           `Topic: ${topic}\n\nThoughts:\n${thoughts.map((t, i) => `${i + 1}. ${t}`).join("\n")}`,
+          "weekly_review",
         ).catch(() => "");
         return { topic, count, summary };
       }),
@@ -122,6 +123,7 @@ Top people: ${topPeople.map((p) => `${p.name} (${p.mentions})`).join(", ")}`;
   const focusText = await chatCompletion(
     "You suggest concise weekly focus areas based on captured thoughts.",
     focusPrompt,
+    "weekly_review",
   ).catch(() => "");
 
   const suggestedFocus = focusText

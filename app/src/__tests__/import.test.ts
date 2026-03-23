@@ -15,9 +15,13 @@ vi.mock("../pipeline.js", () => ({
   capturePipeline: (...args: unknown[]) => mockCapture(...args),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  normalizeContent: (...args: unknown[]) => mockNormalize(...args),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    normalizeContent: (...args: unknown[]) => mockNormalize(...args),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 const AUTH = { Authorization: `Bearer ${process.env.BRAIN_ACCESS_KEY}` };
 

@@ -10,6 +10,7 @@ services:
       - /volume1/docker/open-brain/data:/var/lib/postgresql/data
     networks:
       - brain-net
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U brain_app -d open_brain"]
       interval: 5s
@@ -17,10 +18,11 @@ services:
       retries: 5
 
   app:
+    container_name: open-brain-app
     image: ${DOCKER_IMAGE:-ghcr.io/wheelhouz/open-brain:latest}
     restart: unless-stopped
     ports:
-      - "8420:8420"
+      - "127.0.0.1:8420:8420"
     environment:
       DATABASE_URL: postgresql://brain_app:${DB_PASSWORD}@db:5432/open_brain
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
@@ -28,6 +30,11 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4-6}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       EXTRACTION_MODEL: ${EXTRACTION_MODEL:-openai/gpt-4o-mini}
+    mem_limit: 512m
+    cpus: "1.0"
+    read_only: true
+    tmpfs:
+      - /tmp
     depends_on:
       db:
         condition: service_healthy
@@ -36,4 +43,5 @@ services:
 
 networks:
   brain-net:
+    name: brain-net
     driver: bridge

@@ -47,8 +47,9 @@ thoughtsRouter.get("/", async (c) => {
     }
   }
   if (days) {
+    const parsedDays = Math.min(parseInt(days, 10), 365);
     conditions.push(`created_at > now() - interval '1 day' * $${paramIdx++}`);
-    params.push(parseInt(days, 10));
+    params.push(parsedDays);
   }
   if (source) {
     conditions.push(`metadata->>'source_context' = $${paramIdx++}`);

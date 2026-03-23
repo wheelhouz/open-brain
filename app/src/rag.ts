@@ -1,6 +1,7 @@
 import { query } from "./db.js";
 import { generateEmbedding, rewriteQuery } from "./openrouter.js";
 import { config } from "./config.js";
+import { logger } from "./logger.js";
 import pgvector from "pgvector";
 
 export interface RetrievedThought {
@@ -249,6 +250,11 @@ export async function searchWithReranking(options: {
     }
   }
 
+  const similarities = candidates.map((c) => c.similarity);
+  const scoreDistribution = similarities.length > 0
+    ? { min: Math.min(...similarities), max: Math.max(...similarities), avg: similarities.reduce((a, b) => a + b, 0) / similarities.length }
+    : { min: 0, max: 0, avg: 0 };
+
   const diagnostics: RAGDiagnostics = {
     rewrittenQuery: searchQuery,
     filter,
@@ -258,7 +264,7 @@ export async function searchWithReranking(options: {
     latencyMs: Date.now() - start,
   };
 
-  console.log(JSON.stringify({ event: "rag_retrieval", ...diagnostics }));
+  logger.info({ event: "rag_retrieval", ...diagnostics, zeroResults: reranked.length === 0, scoreDistribution });
 
   return { thoughts: reranked, diagnostics };
 }
@@ -306,6 +312,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
   const candidates: MemoryCandidate[] = [];
   let loopCandidateCount = 0;
   let modelMismatchExclusions = 0;
+  let lexicalFallbackFired = false;
 
   // Thought retrieval — reuse existing patterns
   if (shouldQuery("thoughts")) {
@@ -425,6 +432,7 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     const LEXICAL_FALLBACK_THRESHOLD = 3;
     const topScore = reranked.length > 0 ? reranked[0].similarity : 0;
     if (reranked.length < LEXICAL_FALLBACK_THRESHOLD || topScore < 0.3) {
+      lexicalFallbackFired = true;
       // Extract key terms from query (words 3+ chars, skip stopwords)
       const stopwords = new Set(["the", "what", "about", "that", "this", "with", "from", "have", "been", "does", "did", "was", "were", "are", "for", "and", "how", "why", "who", "when", "where", "which"]);
       const terms = searchQuery.toLowerCase()
@@ -669,17 +677,22 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     loopCandidateCount = loopIds.size;
 
     if (modelMismatchExclusions > 0) {
-      console.log(JSON.stringify({
+      logger.info({
         event: "search_memory_model_mismatch",
         exclusions: modelMismatchExclusions,
         currentModel,
-      }));
+      });
     }
   }
 
   // Merge: sort by score descending, take top limit
   candidates.sort((a, b) => b.score - a.score);
   const finalCandidates = candidates.slice(0, limit);
+
+  const allScores = candidates.map((c) => c.score);
+  const memoryScoreDistribution = allScores.length > 0
+    ? { min: Math.min(...allScores), max: Math.max(...allScores), avg: allScores.reduce((a, b) => a + b, 0) / allScores.length }
+    : { min: 0, max: 0, avg: 0 };
 
   const diagnostics = {
     rewrittenQuery: searchQuery,
@@ -692,7 +705,13 @@ export async function searchMemory(options: SearchMemoryOptions): Promise<Search
     modelMismatchExclusions,
   };
 
-  console.log(JSON.stringify({ event: "search_memory", ...diagnostics }));
+  logger.info({
+    event: "search_memory",
+    ...diagnostics,
+    lexicalFallbackFired,
+    scoreDistribution: memoryScoreDistribution,
+    zeroResults: finalCandidates.length === 0,
+  });
 
   return { candidates: finalCandidates, diagnostics };
 }

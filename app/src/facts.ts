@@ -79,7 +79,7 @@ async function embedFact(
   displayText: string,
 ): Promise<string> {
   const text = renderFactEmbeddingText(entityName, predicate, displayText);
-  const embedding = await generateEmbedding(text);
+  const embedding = await generateEmbedding(text, "embed_fact");
   return pgvector.toSql(embedding);
 }
 

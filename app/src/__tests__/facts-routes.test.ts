@@ -14,11 +14,15 @@ vi.mock("../pipeline.js", () => ({
   capturePipeline: vi.fn(),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
-  extractMetadata: vi.fn(),
-  chatCompletion: vi.fn(),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
+    extractMetadata: vi.fn(),
+    chatCompletion: vi.fn(),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 vi.mock("pgvector", () => ({
   default: { toSql: vi.fn((v: unknown) => `[${String(v)}]`) },

@@ -11,20 +11,24 @@ vi.mock("../db.js", () => ({
 
 const mockCategorizeTopics = vi.fn();
 
-vi.mock("../openrouter.js", () => ({
-  openrouterRequest: vi.fn(),
-  categorizeTopics: (...args: unknown[]) => mockCategorizeTopics(...args),
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
-  extractMetadata: vi.fn().mockResolvedValue({
-    type: "observation",
-    topics: [],
-    people: [],
-    action_items: [],
-    dates_mentioned: [],
-    source_context: null,
-  }),
-  assignCategory: vi.fn().mockResolvedValue("General"),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    openrouterRequest: vi.fn(),
+    categorizeTopics: (...args: unknown[]) => mockCategorizeTopics(...args),
+    generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
+    extractMetadata: vi.fn().mockResolvedValue({
+      type: "observation",
+      topics: [],
+      people: [],
+      action_items: [],
+      dates_mentioned: [],
+      source_context: null,
+    }),
+    assignCategory: vi.fn().mockResolvedValue("General"),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 const AUTH = { Authorization: `Bearer ${process.env.BRAIN_ACCESS_KEY}` };
 

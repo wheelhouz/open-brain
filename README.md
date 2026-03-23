@@ -27,10 +27,10 @@ cd open-brain
 make setup
 
 # Add your OpenRouter API key
-vim .env.prod
+vim .env
 
-# Start with the pre-built image
-make up ENV=prod
+# Start the full stack
+make up
 
 # Verify
 curl http://localhost:8420/health
@@ -40,7 +40,7 @@ To build from source instead:
 
 ```bash
 make setup
-vim .env.dev    # add your OpenRouter API key
+vim .env    # add your OpenRouter API key
 make dev        # local dev with hot reload
 ```
 
@@ -51,21 +51,21 @@ make dev        # local dev with hot reload
 
 ## Make Targets
 
-All targets accept `ENV=dev` (default) or `ENV=prod` to select the environment. Each environment gets its own Docker project name, containers, volumes, and network.
+All local commands use `.env`. Deployment (`make deploy`) uses `.env.prod` for Portainer credentials.
 
 | Target | Description |
 |--------|-------------|
-| `make setup` | Create `.env.dev` and `.env.prod` from template, generate separate secrets |
+| `make setup` | Create `.env` from template with generated secrets |
 | `make install` | Install npm dependencies for both frontend and backend |
-| `make dev` | Start dev DB (port 5433) + local Vite + tsx watch |
+| `make dev` | Start DB + local Vite + tsx watch |
 | `make build` | Build the Docker image |
 | `make push` | Build and push to GHCR locally (CI does this automatically) |
 | `make deploy` | Wait for CI publish, then redeploy via Portainer API |
 | `make up` | Start the full stack (DB + app) in detached mode |
-| `make down` | Stop containers for the selected environment |
+| `make down` | Stop containers |
 | `make logs` | Tail the app container logs |
 | `make test` | Run backend tests (no DB needed) |
-| `make clean` | Stop containers and remove volumes for the selected environment |
+| `make clean` | Stop containers and remove volumes |
 
 ## Development
 

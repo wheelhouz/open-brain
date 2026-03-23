@@ -1,6 +1,8 @@
 import { query } from "./db.js";
 import { config } from "./config.js";
-import { generateEmbedding } from "./openrouter.js";
+import { generateEmbedding, sourceContext } from "./openrouter.js";
+import { logger } from "./logger.js";
+import { queueJobsTotal } from "./metrics.js";
 import pgvector from "pgvector";
 
 const MAX_ATTEMPTS = 5;
@@ -14,10 +16,22 @@ const RATE_LIMIT_DELAY_MS = parseInt(
 let running = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+const MAX_PENDING_JOBS = 500;
+
 export async function enqueueEmbeddingJob(
   loopId: string,
   model: string,
 ): Promise<void> {
+  // Check pending job count before inserting
+  const countResult = await query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM embedding_jobs WHERE status = 'pending'`,
+  );
+  const pendingCount = parseInt(countResult.rows[0]?.count || "0", 10);
+  if (pendingCount >= MAX_PENDING_JOBS) {
+    logger.warn({ event: "queue_depth_cap", pendingCount, loopId });
+    return;
+  }
+
   await query(
     `INSERT INTO embedding_jobs (job_type, payload_json)
      VALUES ('loop_embedding', $1::jsonb)
@@ -62,6 +76,7 @@ async function processJob(
 ): Promise<void> {
   const jobId = job.id as string;
   const payload = job.payload_json as { loop_id: string; target_model: string };
+  const start = Date.now();
 
   try {
     // Fetch loop content
@@ -81,8 +96,10 @@ async function processJob(
 
     const loop = loopResult.rows[0] as { id: string; content: string };
 
-    // Generate embedding
-    const embedding = await generateEmbedding(loop.content);
+    // Generate embedding (wrapped in queue source context)
+    const embedding = await sourceContext.run("queue", () =>
+      generateEmbedding(loop.content, "embed_loop"),
+    );
 
     // Write embedding to loop row
     await query(
@@ -97,6 +114,9 @@ async function processJob(
       `UPDATE embedding_jobs SET status = 'complete', completed_at = now() WHERE id = $1`,
       [jobId],
     );
+
+    logger.info({ event: "job_completed", jobId, loopId: payload.loop_id, latencyMs: Date.now() - start });
+    queueJobsTotal.inc({ status: "complete" });
   } catch (err) {
     const attemptCount = job.attempt_count as number;
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -105,6 +125,8 @@ async function processJob(
         `UPDATE embedding_jobs SET status = 'failed', last_error = $1, completed_at = now() WHERE id = $2`,
         [errorMsg, jobId],
       );
+      logger.error({ event: "job_permanently_failed", jobId, loopId: payload.loop_id, attempts: attemptCount });
+      queueJobsTotal.inc({ status: "failed" });
     } else {
       // Reset to pending with backoff
       await query(
@@ -115,7 +137,7 @@ async function processJob(
         [errorMsg, attemptCount, jobId],
       );
     }
-    console.error(`[queue] Job ${jobId} failed:`, err);
+    logger.error({ event: "job_failed", jobId, loopId: payload.loop_id, err: errorMsg });
   }
 }
 
@@ -141,7 +163,7 @@ async function drain(): Promise<void> {
       job = await claimNextJob("loop_embedding");
     }
   } catch (err) {
-    console.error("[queue] drain error:", err);
+    logger.error({ event: "queue_drain_error", err: err instanceof Error ? err.message : String(err) });
   } finally {
     running = false;
   }

@@ -28,6 +28,10 @@ importRouter.post("/", async (c) => {
     return c.json({ error: "thoughts array is required and must not be empty" }, 400);
   }
 
+  if (body.thoughts.length > 500) {
+    return c.json({ error: "Too many thoughts (max 500)" }, 400);
+  }
+
   const normalize = body.options?.normalize ?? false;
   const sourceLabel = body.options?.source_label;
 

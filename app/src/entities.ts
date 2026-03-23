@@ -1,5 +1,7 @@
 import { query } from "./db.js";
 import { config } from "./config.js";
+import { logger } from "./logger.js";
+import { entityResolutionsTotal } from "./metrics.js";
 
 export type ResolutionState =
   | "auto_linked_exact"
@@ -129,6 +131,9 @@ export async function resolveEntityMentions(
        ON CONFLICT (entity_id, thought_id) DO NOTHING`,
       [entityId, thoughtId, trimmed, normalized, resolutionState, confidence, metadata ? JSON.stringify(metadata) : null],
     );
+
+    logger.info({ event: "entity_resolved", name: trimmed, state: resolutionState, confidence, entityId });
+    entityResolutionsTotal.inc({ state: resolutionState });
 
     results.push({
       raw_mention_text: trimmed,

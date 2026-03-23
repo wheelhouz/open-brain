@@ -1,3 +1,10 @@
+const requiredEnvVars = ["DATABASE_URL", "BRAIN_ACCESS_KEY", "OPENROUTER_API_KEY"] as const;
+for (const key of requiredEnvVars) {
+  if (!process.env[key]) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "8420", 10),
   databaseUrl: process.env.DATABASE_URL!,
@@ -9,4 +16,7 @@ export const config = {
   maxContentLength: 50 * 1024, // 50KB
   entityFuzzyThreshold: parseFloat(process.env.ENTITY_FUZZY_THRESHOLD || "0.35"),
   factConfidenceThreshold: parseFloat(process.env.FACT_CONFIDENCE_THRESHOLD || "0.80"),
+  monthlyBudgetUsd: parseFloat(process.env.MONTHLY_BUDGET_USD || "0"),
+  spendAlertThresholdPct: parseFloat(process.env.SPEND_ALERT_THRESHOLD_PCT || "80"),
+  spendHardCutoffUsd: parseFloat(process.env.SPEND_HARD_CUTOFF_USD || "0"),
 };

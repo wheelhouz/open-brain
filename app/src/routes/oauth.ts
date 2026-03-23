@@ -1,14 +1,11 @@
 import { Hono } from "hono";
 import { config } from "../config.js";
+import { validateAccessKey } from "../auth.js";
 
 const oauthRouter = new Hono();
 
 // In-memory stores (single-user app, no persistence needed)
 const authCodes = new Map<string, { expiresAt: number; redirectUri: string }>();
-const registeredClients = new Map<
-  string,
-  { clientSecret: string; redirectUris: string[] }
->();
 
 function getOrigin(c: { req: { header: (name: string) => string | undefined; url: string } }): string {
   const proto = c.req.header("x-forwarded-proto") || "http";
@@ -33,14 +30,18 @@ wellKnownOAuth.get("/", (c) => {
   });
 });
 
-// Dynamic Client Registration (RFC 7591)
+// Dynamic Client Registration (RFC 7591) — requires access token
 oauthRouter.post("/register", async (c) => {
+  const authHeader = c.req.header("Authorization");
+  const regToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!regToken || !validateAccessKey(regToken)) {
+    return c.json({ error: "Registration requires access token" }, 401);
+  }
+
   const body = await c.req.json();
   const clientId = crypto.randomUUID();
   const clientSecret = crypto.randomUUID();
   const redirectUris: string[] = body.redirect_uris || [];
-
-  registeredClients.set(clientId, { clientSecret, redirectUris });
 
   return c.json(
     {
@@ -54,6 +55,8 @@ oauthRouter.post("/register", async (c) => {
   );
 });
 
+const ALLOWED_REDIRECT_PATTERN = /^http:\/\/localhost(:\d+)?(\/.*)?$|^http:\/\/127\.0\.0\.1(:\d+)?(\/.*)?$/;
+
 // Authorization endpoint — renders a simple login page
 oauthRouter.get("/authorize", (c) => {
   const clientId = c.req.query("client_id") || "";
@@ -61,6 +64,15 @@ oauthRouter.get("/authorize", (c) => {
   const state = c.req.query("state") || "";
   const codeChallenge = c.req.query("code_challenge") || "";
   const codeChallengeMethod = c.req.query("code_challenge_method") || "";
+
+  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+    return c.html(
+      `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
+        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+      </body></html>`,
+      400,
+    );
+  }
 
   const html = `<!DOCTYPE html>
 <html>
@@ -116,7 +128,16 @@ oauthRouter.post("/authorize", async (c) => {
   const codeChallenge = body["code_challenge"] as string;
   const codeChallengeMethod = body["code_challenge_method"] as string;
 
-  if (accessKey !== config.brainAccessKey) {
+  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+    return c.html(
+      `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
+        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+      </body></html>`,
+      400,
+    );
+  }
+
+  if (!validateAccessKey(accessKey as string)) {
     return c.html(
       `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
         <p>Invalid access key. <a href="javascript:history.back()" style="color:#3b82f6">Try again</a></p>

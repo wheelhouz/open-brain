@@ -1,7 +1,7 @@
 import { route } from "preact-router";
 import { selectedThoughtId } from "../state";
 
-const TABS = ["/", "/topics", "/people", "/stats", "/chat"];
+const TABS = ["/", "/topics", "/people", "/loops", "/stats", "/chat", "/spend"];
 
 function isEditing(): boolean {
   const el = document.activeElement;
@@ -62,8 +62,12 @@ export function initShortcuts() {
       case "3":
       case "4":
       case "5":
-        route(TABS[parseInt(e.key) - 1]);
-        e.preventDefault();
+      case "6":
+      case "7":
+        if (parseInt(e.key) <= TABS.length) {
+          route(TABS[parseInt(e.key) - 1]);
+          e.preventDefault();
+        }
         break;
     }
   });

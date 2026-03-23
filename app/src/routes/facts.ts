@@ -94,7 +94,7 @@ factsRouter.post("/", async (c) => {
   // Check for conflicts
   const existing = await query<{ id: string; predicate: string; object_display_text: string; status: string }>(
     `SELECT id, predicate, object_display_text, status FROM entity_facts
-     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND review_state != 'rejected'`,
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND review_state != 'rejected'`,
     [entityId, predicate],
   );
 
@@ -121,7 +121,7 @@ factsRouter.post("/", async (c) => {
 
   // Embed and insert
   const embeddingText = renderFactEmbeddingText(entityResult.rows[0].canonical_name, predicate, displayText);
-  const embedding = await generateEmbedding(embeddingText);
+  const embedding = await generateEmbedding(embeddingText, "embed_fact");
 
   const result = await query(
     `INSERT INTO entity_facts (entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, valid_at_start, valid_at_end, embedding)
@@ -204,7 +204,7 @@ factsRouter.patch("/:factId", async (c) => {
       `SELECT canonical_name FROM entities WHERE id = $1`, [entityId],
     );
     const embeddingText = renderFactEmbeddingText(entityResult.rows[0].canonical_name, newPredicate, newDisplayText);
-    const embedding = await generateEmbedding(embeddingText);
+    const embedding = await generateEmbedding(embeddingText, "embed_fact");
     updates.push(`embedding = $${paramIdx}`);
     params.push(pgvector.toSql(embedding));
     paramIdx++;
@@ -236,7 +236,7 @@ factsRouter.post("/:factId/accept", async (c) => {
   // Check for conflicts (active OR disputed with same predicate)
   const conflicts = await query<{ id: string; predicate: string; object_display_text: string; status: string }>(
     `SELECT id, predicate, object_display_text, status FROM entity_facts
-     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
        AND (status = 'active' OR status = 'disputed')
        AND review_state != 'rejected'`,
     [entityId, factResult.rows[0].predicate, factId],
@@ -280,7 +280,7 @@ factsRouter.post("/:factId/reject", async (c) => {
   if (fact.status === "disputed") {
     await query(
       `UPDATE entity_facts SET status = 'active', updated_at = now()
-       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
          AND status = 'disputed' AND review_state != 'rejected'`,
       [entityId, fact.predicate, factId],
     );
@@ -319,7 +319,7 @@ factsRouter.post("/:factId/resolve-conflict", async (c) => {
 
   const oldFact = await query<{ id: string }>(
     `SELECT id FROM entity_facts
-     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+     WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
        AND status = 'disputed' AND review_state != 'rejected'
      LIMIT 1`,
     [entityId, newFact.rows[0].predicate, factId],
@@ -378,7 +378,7 @@ factsRouter.delete("/:factId", async (c) => {
   if (fact.status === "disputed") {
     await query(
       `UPDATE entity_facts SET status = 'active', updated_at = now()
-       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2) AND id != $3
+       WHERE entity_id = $1 AND replace(lower(predicate), ' ', '_') = $2 AND id != $3
          AND status = 'disputed' AND review_state != 'rejected'`,
       [entityId, fact.predicate, factId],
     );

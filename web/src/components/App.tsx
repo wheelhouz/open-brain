@@ -13,9 +13,10 @@ import { ChatView } from "../views/ChatView";
 import { CaptureBar } from "./CaptureBar";
 import { SearchBar } from "./SearchBar";
 import { LoopsView } from "../views/LoopsView";
+import { SpendView } from "../views/SpendView";
 import { PersonOverlay } from "./PersonOverlay";
 import { LoopDetailPanel } from "./LoopDetailPanel";
-import { Brain, List, Hash, Users, BarChart3, MessageCircle, CircleDot } from "lucide-preact";
+import { Brain, List, Hash, Users, BarChart3, MessageCircle, CircleDot, DollarSign } from "lucide-preact";
 
 const tabs = [
   { path: "/", label: "Stream", icon: List, key: "1" },
@@ -24,6 +25,7 @@ const tabs = [
   { path: "/loops", label: "Loops", icon: CircleDot, key: "4" },
   { path: "/stats", label: "Stats", icon: BarChart3, key: "5" },
   { path: "/chat", label: "Chat", icon: MessageCircle, key: "6" },
+  { path: "/spend", label: "Spend", icon: DollarSign, key: "7" },
 ];
 
 export function App() {
@@ -99,6 +101,7 @@ export function App() {
             <LoopsView path="/loops" />
             <StatsView path="/stats" />
             <ChatView path="/chat" />
+            <SpendView path="/spend" />
           </Router>
         </main>
 

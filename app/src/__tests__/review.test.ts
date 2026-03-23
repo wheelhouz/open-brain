@@ -10,9 +10,13 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  chatCompletion: (...args: unknown[]) => mockChat(...args),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    chatCompletion: (...args: unknown[]) => mockChat(...args),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 const AUTH = { Authorization: `Bearer ${process.env.BRAIN_ACCESS_KEY}` };
 
