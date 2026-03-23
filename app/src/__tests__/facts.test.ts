@@ -20,6 +20,11 @@ vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
 }));
 
+const mockLoggerInfo = vi.fn();
+vi.mock("../logger.js", () => ({
+  logger: { info: (...args: unknown[]) => mockLoggerInfo(...args), warn: vi.fn(), error: vi.fn() },
+}));
+
 import { processFactCandidates, normalizePredicate, renderFactEmbeddingText, isValidPredicateShape } from "../facts.js";
 import type { MentionResolution } from "../entities.js";
 
@@ -232,7 +237,7 @@ describe("processFactCandidates", () => {
   });
 
   it("logs structured event when candidate is below confidence threshold", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockLoggerInfo.mockClear();
 
     await processFactCandidates(
       [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 0.5, excerpt: "from Porto" }],
@@ -241,18 +246,17 @@ describe("processFactCandidates", () => {
       "Maya is from Porto",
     );
 
-    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const logCalls = mockLoggerInfo.mock.calls.map((c) => c[0]);
     expect(logCalls).toContainEqual(expect.objectContaining({
       event: "fact_skipped",
       reason: "confidence_below_threshold",
       thoughtId: "thought-1",
       entity: "Maya",
     }));
-    logSpy.mockRestore();
   });
 
   it("logs structured event when entity is unresolved", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockLoggerInfo.mockClear();
     const unresolvedMap: MentionResolution[] = [
       { ...mentionMap[0], resolution_state: "pending_review" },
     ];
@@ -264,7 +268,7 @@ describe("processFactCandidates", () => {
       "Maya is from Porto",
     );
 
-    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const logCalls = mockLoggerInfo.mock.calls.map((c) => c[0]);
     expect(logCalls).toContainEqual(expect.objectContaining({
       event: "fact_skipped",
       reason: "entity_unresolved",
@@ -272,11 +276,10 @@ describe("processFactCandidates", () => {
       entity: "Maya",
       resolution_state: "pending_review",
     }));
-    logSpy.mockRestore();
   });
 
   it("clamps out-of-range confidence to 0 and logs", async () => {
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockLoggerInfo.mockClear();
 
     await processFactCandidates(
       [{ entity: "Maya", predicate: "from", value: "Porto", display: "Porto", confidence: 1.5, excerpt: "from Porto" }],
@@ -285,7 +288,7 @@ describe("processFactCandidates", () => {
       "Maya is from Porto",
     );
 
-    const logCalls = logSpy.mock.calls.map((c) => JSON.parse(c[0] as string));
+    const logCalls = mockLoggerInfo.mock.calls.map((c) => c[0]);
     expect(logCalls).toContainEqual(expect.objectContaining({
       event: "fact_candidate_clamped",
       thoughtId: "thought-1",
@@ -297,6 +300,5 @@ describe("processFactCandidates", () => {
       reason: "confidence_below_threshold",
     }));
     expect(mockQuery).not.toHaveBeenCalled();
-    logSpy.mockRestore();
   });
 });

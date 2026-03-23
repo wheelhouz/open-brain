@@ -45,6 +45,8 @@ services:
     volumes:
       - /volume1/docker/open-brain/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
     networks:
       - brain-net
     restart: unless-stopped
@@ -64,6 +66,27 @@ services:
       - brain-net
     restart: unless-stopped
 
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - /volume1/docker/open-brain/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    networks:
+      - brain-net
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:latest
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - /volume1/docker/open-brain/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - brain-net
+    restart: unless-stopped
+
   uptime-kuma:
     image: louislam/uptime-kuma:latest
     volumes:
@@ -77,6 +100,7 @@ services:
 volumes:
   prometheus_data:
   grafana_data:
+  loki_data:
   uptime_data:
 
 networks:

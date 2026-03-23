@@ -4,6 +4,7 @@ import { generateEmbedding } from "./openrouter.js";
 import pgvector from "pgvector";
 import type { MentionResolution } from "./entities.js";
 import { validateFactCandidate } from "./validateFact.js";
+import { logger } from "./logger.js";
 
 export interface FactCandidate {
   entity: string;
@@ -97,31 +98,31 @@ export async function processFactCandidates(
 
     // Clamp out-of-range confidence to 0
     if (candidate.confidence < 0 || candidate.confidence > 1) {
-      console.log(JSON.stringify({ event: "fact_candidate_clamped", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, original: candidate.confidence }));
+      logger.info({ event: "fact_candidate_clamped", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, original: candidate.confidence });
       candidate.confidence = 0;
     }
 
     // Filter below threshold
     if (candidate.confidence < config.factConfidenceThreshold) {
-      console.log(JSON.stringify({ event: "fact_skipped", reason: "confidence_below_threshold", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, confidence: candidate.confidence }));
+      logger.info({ event: "fact_skipped", reason: "confidence_below_threshold", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, confidence: candidate.confidence });
       continue;
     }
 
     // Validate candidate against source content
     const validation = validateFactCandidate(candidate, sourceContent);
     if (!validation.valid) {
-      console.log(JSON.stringify({ event: "fact_skipped", thoughtId, entity: candidate.entity, predicate: normalizePredicate(candidate.predicate), display, reasons: validation.reasons, containingLine: validation.containingLine }));
+      logger.info({ event: "fact_skipped", thoughtId, entity: candidate.entity, predicate: normalizePredicate(candidate.predicate), display, reasons: validation.reasons, containingLine: validation.containingLine });
       continue;
     }
     if (validation.flagged) {
-      console.log(JSON.stringify({ event: "fact_flagged", thoughtId, entity: candidate.entity, predicate: normalizePredicate(candidate.predicate), display, reasons: validation.reasons }));
+      logger.info({ event: "fact_flagged", thoughtId, entity: candidate.entity, predicate: normalizePredicate(candidate.predicate), display, reasons: validation.reasons });
     }
 
     // Resolve entity from mention map
     const normalized = candidate.entity.trim().toLowerCase();
     const mention = mentionLookup.get(normalized);
     if (!mention || !autoLinkedStates.has(mention.resolution_state)) {
-      console.log(JSON.stringify({ event: "fact_skipped", reason: "entity_unresolved", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, resolution_state: mention?.resolution_state ?? null }));
+      logger.info({ event: "fact_skipped", reason: "entity_unresolved", thoughtId, entity: candidate.entity, predicate: candidate.predicate, display, resolution_state: mention?.resolution_state ?? null });
       continue;
     }
 
@@ -164,7 +165,7 @@ export async function processFactCandidates(
         `UPDATE entity_facts SET updated_at = now() WHERE id = $1`,
         [factId],
       );
-      console.log(JSON.stringify({ event: "fact_dedup", thoughtId, entity: candidate.entity, predicate, display: displayText, existingFactId: factId }));
+      logger.info({ event: "fact_dedup", thoughtId, entity: candidate.entity, predicate, display: displayText, existingFactId: factId });
     } else if (conflicting) {
       // Insert new fact as disputed
       const embeddingVal = await embedFact(mention.raw_mention_text, predicate, displayText);
@@ -181,7 +182,7 @@ export async function processFactCandidates(
         `UPDATE entity_facts SET status = 'disputed', updated_at = now() WHERE id = $1 AND status != 'disputed'`,
         [conflicting.id],
       );
-      console.log(JSON.stringify({ event: "fact_inserted", thoughtId, entity: candidate.entity, predicate, display: displayText, factId, status: "disputed", conflictsWith: conflicting.id }));
+      logger.info({ event: "fact_inserted", thoughtId, entity: candidate.entity, predicate, display: displayText, factId, status: "disputed", conflictsWith: conflicting.id });
     } else {
       // No conflict — insert as tentative/pending
       const embeddingVal = await embedFact(mention.raw_mention_text, predicate, displayText);
@@ -192,7 +193,7 @@ export async function processFactCandidates(
         [entityId, predicate, JSON.stringify(objectValueJson), displayText, candidate.confidence, embeddingVal],
       );
       factId = result.rows[0].id;
-      console.log(JSON.stringify({ event: "fact_inserted", thoughtId, entity: candidate.entity, predicate, display: displayText, factId, status: "tentative" }));
+      logger.info({ event: "fact_inserted", thoughtId, entity: candidate.entity, predicate, display: displayText, factId, status: "tentative" });
     }
 
     // Attach evidence
