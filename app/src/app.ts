@@ -24,6 +24,7 @@ import { loopsRouter } from "./routes/loops.js";
 import { entitiesRouter } from "./routes/entities.js";
 import { pendingFactsRouter } from "./routes/facts.js";
 import { backfillRouter } from "./routes/backfill.js";
+import { spendRouter } from "./routes/spend.js";
 import { oauthRouter, wellKnownOAuth } from "./routes/oauth.js";
 import { sourceContext } from "./openrouter.js";
 import { readFile } from "node:fs/promises";
@@ -111,6 +112,7 @@ api.route("/loops", loopsRouter);
 api.route("/facts/pending", pendingFactsRouter);
 api.route("/entities", entitiesRouter);
 api.route("/backfill", backfillRouter);
+api.route("/spend", spendRouter);
 
 app.route("/api", api);
 

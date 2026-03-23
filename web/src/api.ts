@@ -173,6 +173,29 @@ export interface SourceLoop {
   loop_type: string;
 }
 
+export interface SpendSummary {
+  today: { calls: number; tokens: number; estimated_usd: number };
+  this_month: { calls: number; tokens: number; estimated_usd: number };
+  all_time: { calls: number; tokens: number; estimated_usd: number };
+}
+
+export interface SpendBreakdown {
+  period_days: number;
+  by_operation: Array<{ operation: string; calls: string; tokens: string; usd: string }>;
+  by_model: Array<{ model: string; calls: string; tokens: string; usd: string }>;
+  by_source: Array<{ source: string; calls: string; tokens: string; usd: string }>;
+  daily: Array<{ date: string; calls: string; tokens: string; usd: string }>;
+}
+
+export interface SpendBudget {
+  monthly_budget_usd: number;
+  month_to_date_usd: number;
+  percent_used: number;
+  alert_threshold_pct: number;
+  alert_triggered: boolean;
+  hard_cutoff_usd: number;
+}
+
 // API methods
 export const api = {
   validate: () => request<StatsResponse>("/api/stats"),
@@ -523,4 +546,9 @@ export const api = {
       }
     }
   },
+
+  spendSummary: () => request<SpendSummary>("/api/spend/summary"),
+  spendBreakdown: (days?: number) =>
+    request<SpendBreakdown>(`/api/spend/breakdown${days ? `?period=${days}` : ""}`),
+  spendBudget: () => request<SpendBudget>("/api/spend/budget"),
 };
