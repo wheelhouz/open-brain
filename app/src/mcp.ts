@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query } from "./db.js";
 import { chatCompletion, generateEmbedding } from "./openrouter.js";
 import { capturePipeline } from "./pipeline.js";
+import { config } from "./config.js";
 import { searchWithReranking, searchMemory } from "./rag.js";
 import { resolveEntityCandidates } from "./entities.js";
 import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
@@ -219,6 +220,12 @@ export function createMcpServer(): McpServer {
       parent_id: z.string().optional().describe("Parent thought ID to link as sub-thought"),
     },
     async ({ content, parent_id }) => {
+      if (content.length > config.maxContentLength) {
+        return {
+          content: [{ type: "text" as const, text: `Content exceeds maximum length of ${config.maxContentLength} bytes.` }],
+          isError: true,
+        };
+      }
       const result = await capturePipeline(content, "mcp", parent_id);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
@@ -235,6 +242,19 @@ export function createMcpServer(): McpServer {
       content: z.string().describe("The note content to save"),
     },
     async ({ thought_id, content }) => {
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!UUID_RE.test(thought_id)) {
+        return {
+          content: [{ type: "text" as const, text: "Invalid thought_id: must be a valid UUID." }],
+          isError: true,
+        };
+      }
+      if (content.length > config.maxContentLength) {
+        return {
+          content: [{ type: "text" as const, text: `Content exceeds maximum length of ${config.maxContentLength} bytes.` }],
+          isError: true,
+        };
+      }
       const parent = await query(
         `SELECT id FROM thoughts WHERE id = $1 AND deleted_at IS NULL`,
         [thought_id],
@@ -260,6 +280,12 @@ export function createMcpServer(): McpServer {
       source_label: z.string().optional().describe("Origin system label"),
     },
     async ({ thoughts, source_label }) => {
+      if (thoughts.length > 100) {
+        return {
+          content: [{ type: "text" as const, text: "Too many thoughts (max 100)." }],
+          isError: true,
+        };
+      }
       let imported = 0;
       let failed = 0;
 
@@ -290,7 +316,8 @@ export function createMcpServer(): McpServer {
     {
       days: z.number().default(7).describe("Number of days to review"),
     },
-    async ({ days }) => {
+    async ({ days: rawDays }) => {
+      const days = Math.min(rawDays, 90);
       const [thoughtsResult, loopsResult, peopleResult] = await Promise.all([
         query<{
           id: string;
@@ -301,7 +328,8 @@ export function createMcpServer(): McpServer {
           `SELECT id, content, metadata, created_at
            FROM thoughts
            WHERE deleted_at IS NULL AND created_at > now() - interval '1 day' * $1
-           ORDER BY created_at DESC`,
+           ORDER BY created_at DESC
+           LIMIT 500`,
           [days],
         ),
         query<{ content: string; loop_type: string; created_at: string }>(

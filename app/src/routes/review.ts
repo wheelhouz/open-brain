@@ -5,7 +5,7 @@ import { chatCompletion } from "../openrouter.js";
 export const reviewRouter = new Hono();
 
 reviewRouter.get("/", async (c) => {
-  const days = parseInt(c.req.query("days") || "7", 10);
+  const days = Math.min(parseInt(c.req.query("days") || "7", 10), 365);
 
   // Get all thoughts from the period
   const result = await query<{

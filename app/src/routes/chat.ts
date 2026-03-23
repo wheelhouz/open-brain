@@ -41,6 +41,10 @@ chatRouter.post("/", async (c) => {
     return c.json({ error: "messages array is required" }, 400);
   }
 
+  if (body.messages.length > 50) {
+    return c.json({ error: "Too many messages (max 50)" }, 400);
+  }
+
   const lastUserMsg = [...body.messages].reverse().find((m) => m.role === "user");
   if (!lastUserMsg) {
     return c.json({ error: "at least one user message is required" }, 400);

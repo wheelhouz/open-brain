@@ -23,6 +23,11 @@ captureRouter.post("/", async (c) => {
     );
   }
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (body.parent_id && !UUID_RE.test(body.parent_id)) {
+    return c.json({ error: "parent_id must be a valid UUID" }, 400);
+  }
+
   const result = await capturePipeline(content, body.source, body.parent_id);
   return c.json(result, 201);
 });

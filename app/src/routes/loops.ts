@@ -137,6 +137,11 @@ loopsRouter.post("/", async (c) => {
     return c.json({ error: "content is required" }, 400);
   }
 
+  const validLoopTypes = ["task", "question", "decision", "waiting_on"];
+  if (body.loop_type && !validLoopTypes.includes(body.loop_type)) {
+    return c.json({ error: `Invalid loop_type. Must be one of: ${validLoopTypes.join(", ")}` }, 400);
+  }
+
   const result = await query<{ id: string; created_at: string }>(
     `INSERT INTO open_loops (content, loop_type, source_thought_id)
      VALUES ($1, $2, $3)
@@ -174,6 +179,11 @@ loopsRouter.patch("/:id", async (c) => {
 
   if (existing.rows.length === 0) {
     return c.json({ error: "Loop not found" }, 404);
+  }
+
+  const validStatuses = ["open", "closed", "snoozed"];
+  if (body.status && !validStatuses.includes(body.status)) {
+    return c.json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` }, 400);
   }
 
   const sets: string[] = [];
