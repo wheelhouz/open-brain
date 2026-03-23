@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: open-brain
+    static_configs:
+      - targets: ["open-brain-app:8420"]
