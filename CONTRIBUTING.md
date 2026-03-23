@@ -3,8 +3,8 @@
 ## Local setup
 
 ```bash
-make setup    # creates .env.dev and .env.prod
-# edit .env.dev to add your OpenRouter API key
+make setup    # creates .env with generated secrets
+# edit .env to add your OpenRouter API key
 make install  # install dependencies
 make dev      # start dev server + database
 ```
