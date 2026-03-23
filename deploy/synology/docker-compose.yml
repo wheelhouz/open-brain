@@ -40,6 +40,45 @@ services:
     networks:
       - brain-net
 
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - /volume1/docker/open-brain/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - brain-net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - /volume1/docker/open-brain/grafana/provisioning:/etc/grafana/provisioning:ro
+      - /volume1/docker/open-brain/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - brain-net
+    restart: unless-stopped
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    volumes:
+      - uptime_data:/app/data
+    ports:
+      - "3002:3001"
+    networks:
+      - brain-net
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  uptime_data:
+
 networks:
   brain-net:
     name: brain-net
