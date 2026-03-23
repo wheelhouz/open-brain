@@ -1,0 +1,37 @@
+groups:
+  - name: open-brain
+    rules:
+      - alert: AppDown
+        expr: up{job="open-brain"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Open Brain app is down"
+          description: "Prometheus has been unable to scrape open-brain-app:8420 for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: rate(open_brain_http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP error rate"
+          description: "More than 0.1 req/s returning 5xx for 2+ minutes."
+
+      - alert: BudgetCutoffFired
+        expr: increase(open_brain_budget_cutoff_total[1h]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "AI budget cutoff triggered"
+          description: "The hard spend cutoff fired in the last hour — AI calls are being blocked."
+
+      - alert: OpenRouterErrors
+        expr: rate(open_brain_openrouter_calls_total{status="error"}[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenRouter API errors"
+          description: "OpenRouter error rate exceeds 0.05/s for 3+ minutes."
