@@ -1,5 +1,4 @@
 import { useState, useEffect } from "preact/hooks";
-import type { RoutableProps } from "../lib/route";
 import {
   api,
   type SpendSummary,
@@ -127,7 +126,7 @@ function BreakdownTable({
   );
 }
 
-export function SpendView(_props: RoutableProps) {
+export function SpendPanel() {
   const [summary, setSummary] = useState<SpendSummary | null>(null);
   const [breakdown, setBreakdown] = useState<SpendBreakdown | null>(null);
   const [budget, setBudget] = useState<SpendBudget | null>(null);
@@ -150,26 +149,20 @@ export function SpendView(_props: RoutableProps) {
 
   if (loading) {
     return (
-      <div class="p-4">
-        <p class="text-[var(--text-muted)] text-sm">Loading spend data...</p>
-      </div>
+      <p class="text-[var(--text-muted)] text-sm">Loading spend data...</p>
     );
   }
 
   if (!summary || !breakdown || !budget) {
     return (
-      <div class="p-4 text-center py-12">
+      <div class="text-center py-12">
         <p class="text-[var(--text-muted)]">Failed to load spend data</p>
       </div>
     );
   }
 
   return (
-    <div class="p-4">
-      <h2 class="text-lg font-semibold text-[var(--text-primary)] mb-4">
-        AI Spend
-      </h2>
-
+    <>
       {/* Budget alert */}
       {budget.alert_triggered && (
         <div class="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center gap-2">
@@ -260,6 +253,6 @@ export function SpendView(_props: RoutableProps) {
           labelKey="source"
         />
       </div>
-    </div>
+    </>
   );
 }
