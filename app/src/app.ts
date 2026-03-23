@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Context, Next } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { isHealthy } from "./db.js";
 import { auth } from "./middleware/auth.js";
@@ -22,11 +23,49 @@ import { existsSync } from "node:fs";
 
 const app = new Hono();
 
-// OAuth endpoints — no auth required (they ARE the auth)
+// Security headers — applied to all routes
+app.use("*", async (c: Context, next: Next) => {
+  await next();
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("X-Frame-Options", "DENY");
+  c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+});
+
+// Global error handler
+app.onError((err, c) => {
+  console.error("[app] Unhandled error:", err);
+  return c.json({ error: "Internal server error" }, 500);
+});
+
+// --- Rate limiting ---
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(limit: number, windowMs: number) {
+  return async (c: Context, next: Next) => {
+    const key = c.req.header("authorization") || c.req.header("x-forwarded-for") || "anon";
+    const now = Date.now();
+    const entry = rateLimits.get(key);
+    if (!entry || now > entry.resetAt) {
+      rateLimits.set(key, { count: 1, resetAt: now + windowMs });
+    } else if (entry.count >= limit) {
+      return c.json({ error: "Too many requests" }, 429);
+    } else {
+      entry.count++;
+    }
+    await next();
+  };
+}
+
+// Export for testing
+export { rateLimits };
+
+// OAuth endpoints — no auth required (they ARE the auth), rate limited
+app.use("/oauth/*", rateLimit(10, 60_000));
 app.route("/.well-known/oauth-authorization-server", wellKnownOAuth);
 app.route("/oauth", oauthRouter);
 
-// MCP endpoint — handles its own auth (supports query param auth for clients)
+// MCP endpoint — handles its own auth, rate limited separately (30/min)
+app.use("/mcp", rateLimit(30, 60_000));
 app.route("/mcp", mcpRouter);
 
 // Health check — no auth required
@@ -38,8 +77,9 @@ app.get("/health", async (c) => {
   return c.json({ status: "ok" });
 });
 
-// All API routes require auth
+// All API routes require auth, rate limited (60/min)
 const api = new Hono();
+api.use("*", rateLimit(60, 60_000));
 api.use("*", auth);
 api.route("/capture", captureRouter);
 api.route("/search", searchRouter);

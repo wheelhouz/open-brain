@@ -13,8 +13,10 @@ export async function openrouterRequest(path: string, body: unknown): Promise<un
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenRouter ${path} failed (${res.status}): ${text}`);
+    // Consume the response body but don't include it in the error
+    // (raw text may contain API keys or internal details)
+    await res.text();
+    throw new Error(`OpenRouter ${path} failed (${res.status})`);
   }
 
   return res.json();
@@ -151,8 +153,9 @@ export function chatCompletionStream(
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        controller.enqueue(`Error: OpenRouter returned ${res.status}: ${text}`);
+        // Consume body but don't expose raw details to client
+        await res.text();
+        controller.enqueue(`Error: OpenRouter returned ${res.status}`);
         controller.close();
         return;
       }

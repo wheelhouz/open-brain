@@ -4,6 +4,8 @@ import { config } from "./config.js";
 export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
   max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
 export async function query<T extends pg.QueryResultRow>(

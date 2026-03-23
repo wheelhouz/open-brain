@@ -30,18 +30,37 @@ afterEach(() => {
 
 describe("enqueueEmbeddingJob", () => {
   it("inserts a job with ON CONFLICT DO NOTHING", async () => {
-    mockQuery.mockResolvedValue({ rows: [] });
+    // First call: pending count check, second call: INSERT
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "0" }] });
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+
+    await enqueueEmbeddingJob("loop-1", "openai/text-embedding-3-small");
+
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    // First call checks pending count
+    const countSql = mockQuery.mock.calls[0][0] as string;
+    expect(countSql).toContain("status = 'pending'");
+    // Second call inserts the job
+    const sql = mockQuery.mock.calls[1][0] as string;
+    expect(sql).toContain("INSERT INTO embedding_jobs");
+    expect(sql).toContain("ON CONFLICT DO NOTHING");
+    const params = mockQuery.mock.calls[1][1] as string[];
+    const payload = JSON.parse(params[0]);
+    expect(payload.loop_id).toBe("loop-1");
+    expect(payload.target_model).toBe("openai/text-embedding-3-small");
+  });
+
+  it("skips insert when queue depth cap is reached", async () => {
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "500" }] });
 
     await enqueueEmbeddingJob("loop-1", "openai/text-embedding-3-small");
 
     expect(mockQuery).toHaveBeenCalledOnce();
-    const sql = mockQuery.mock.calls[0][0] as string;
-    expect(sql).toContain("INSERT INTO embedding_jobs");
-    expect(sql).toContain("ON CONFLICT DO NOTHING");
-    const params = mockQuery.mock.calls[0][1] as string[];
-    const payload = JSON.parse(params[0]);
-    expect(payload.loop_id).toBe("loop-1");
-    expect(payload.target_model).toBe("openai/text-embedding-3-small");
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Queue depth cap reached"),
+    );
+    consoleSpy.mockRestore();
   });
 });
 
@@ -113,16 +132,20 @@ describe("scheduleBackfillSweep", () => {
     mockQuery.mockResolvedValueOnce({
       rows: [{ id: "loop-a" }, { id: "loop-b" }],
     });
-    // 3. enqueue for loop-a
+    // 3. pending count check for loop-a
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "0" }] });
+    // 4. enqueue for loop-a
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    // 4. enqueue for loop-b
+    // 5. pending count check for loop-b
+    mockQuery.mockResolvedValueOnce({ rows: [{ count: "1" }] });
+    // 6. enqueue for loop-b
     mockQuery.mockResolvedValueOnce({ rows: [] });
-    // 5+ drain calls (recover stale, claim) — no jobs
+    // 7+ drain calls (recover stale, claim) — no jobs
     mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 
     await scheduleBackfillSweep();
 
-    // Verify two enqueue calls happened (calls 2 and 3, 0-indexed)
+    // Verify two enqueue calls happened
     const enqueueCalls = mockQuery.mock.calls.filter((call) =>
       (call[0] as string).includes("INSERT INTO embedding_jobs"),
     );

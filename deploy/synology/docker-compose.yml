@@ -10,6 +10,7 @@ services:
       - /volume1/docker/open-brain/data:/var/lib/postgresql/data
     networks:
       - brain-net
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U brain_app -d open_brain"]
       interval: 5s
@@ -28,6 +29,8 @@ services:
       CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4-6}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       EXTRACTION_MODEL: ${EXTRACTION_MODEL:-openai/gpt-4o-mini}
+    mem_limit: 512m
+    cpus: "1.0"
     depends_on:
       db:
         condition: service_healthy

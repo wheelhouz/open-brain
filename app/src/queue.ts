@@ -14,10 +14,22 @@ const RATE_LIMIT_DELAY_MS = parseInt(
 let running = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+const MAX_PENDING_JOBS = 500;
+
 export async function enqueueEmbeddingJob(
   loopId: string,
   model: string,
 ): Promise<void> {
+  // Check pending job count before inserting
+  const countResult = await query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM embedding_jobs WHERE status = 'pending'`,
+  );
+  const pendingCount = parseInt(countResult.rows[0]?.count || "0", 10);
+  if (pendingCount >= MAX_PENDING_JOBS) {
+    console.warn(`[queue] Queue depth cap reached (${pendingCount} pending jobs), skipping enqueue for loop ${loopId}`);
+    return;
+  }
+
   await query(
     `INSERT INTO embedding_jobs (job_type, payload_json)
      VALUES ('loop_embedding', $1::jsonb)

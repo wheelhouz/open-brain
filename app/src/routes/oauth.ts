@@ -34,8 +34,14 @@ wellKnownOAuth.get("/", (c) => {
   });
 });
 
-// Dynamic Client Registration (RFC 7591)
+// Dynamic Client Registration (RFC 7591) — requires access token
 oauthRouter.post("/register", async (c) => {
+  const authHeader = c.req.header("Authorization");
+  const regToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!regToken || !validateAccessKey(regToken)) {
+    return c.json({ error: "Registration requires access token" }, 401);
+  }
+
   const body = await c.req.json();
   const clientId = crypto.randomUUID();
   const clientSecret = crypto.randomUUID();
@@ -55,6 +61,8 @@ oauthRouter.post("/register", async (c) => {
   );
 });
 
+const ALLOWED_REDIRECT_PATTERN = /^http:\/\/localhost(:\d+)?(\/.*)?$|^http:\/\/127\.0\.0\.1(:\d+)?(\/.*)?$/;
+
 // Authorization endpoint — renders a simple login page
 oauthRouter.get("/authorize", (c) => {
   const clientId = c.req.query("client_id") || "";
@@ -62,6 +70,15 @@ oauthRouter.get("/authorize", (c) => {
   const state = c.req.query("state") || "";
   const codeChallenge = c.req.query("code_challenge") || "";
   const codeChallengeMethod = c.req.query("code_challenge_method") || "";
+
+  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+    return c.html(
+      `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
+        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+      </body></html>`,
+      400,
+    );
+  }
 
   const html = `<!DOCTYPE html>
 <html>
@@ -116,6 +133,15 @@ oauthRouter.post("/authorize", async (c) => {
   const state = body["state"] as string;
   const codeChallenge = body["code_challenge"] as string;
   const codeChallengeMethod = body["code_challenge_method"] as string;
+
+  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+    return c.html(
+      `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
+        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+      </body></html>`,
+      400,
+    );
+  }
 
   if (!validateAccessKey(accessKey as string)) {
     return c.html(
