@@ -16,4 +16,7 @@ export const config = {
   maxContentLength: 50 * 1024, // 50KB
   entityFuzzyThreshold: parseFloat(process.env.ENTITY_FUZZY_THRESHOLD || "0.35"),
   factConfidenceThreshold: parseFloat(process.env.FACT_CONFIDENCE_THRESHOLD || "0.80"),
+  monthlyBudgetUsd: parseFloat(process.env.MONTHLY_BUDGET_USD || "0"),
+  spendAlertThresholdPct: parseFloat(process.env.SPEND_ALERT_THRESHOLD_PCT || "80"),
+  spendHardCutoffUsd: parseFloat(process.env.SPEND_HARD_CUTOFF_USD || "0"),
 };
