@@ -31,7 +31,6 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       EXTRACTION_MODEL: ${EXTRACTION_MODEL:-openai/gpt-4o-mini}
     mem_limit: 512m
-    cpus: "1.0"
     read_only: true
     tmpfs:
       - /tmp
