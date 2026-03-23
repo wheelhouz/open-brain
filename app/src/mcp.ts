@@ -388,6 +388,7 @@ export function createMcpServer(): McpServer {
       const review = await chatCompletion(
         `You are a personal knowledge assistant. Analyze the following thoughts captured over the last ${days} days and provide a structured weekly review with: 1) Key themes, 2) Open action items, 3) Most mentioned people, 4) Suggested focus areas for next week.`,
         thoughtsSummary + loopsSummary + peopleSummary,
+        "weekly_review",
       );
 
       return {
@@ -698,7 +699,7 @@ export function createMcpServer(): McpServer {
       );
 
       const embeddingText = renderFactEmbeddingText(entity.canonical_name, normalizedPredicate, displayText);
-      const embedding = await generateEmbedding(embeddingText);
+      const embedding = await generateEmbedding(embeddingText, "embed_fact");
 
       if (conflict) {
         // Create as disputed and mark existing as disputed too

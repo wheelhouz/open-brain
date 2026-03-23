@@ -10,9 +10,13 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  generateEmbedding: (...args: unknown[]) => mockEmbedding(...args),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    generateEmbedding: (...args: unknown[]) => mockEmbedding(...args),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },

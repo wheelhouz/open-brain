@@ -121,7 +121,7 @@ factsRouter.post("/", async (c) => {
 
   // Embed and insert
   const embeddingText = renderFactEmbeddingText(entityResult.rows[0].canonical_name, predicate, displayText);
-  const embedding = await generateEmbedding(embeddingText);
+  const embedding = await generateEmbedding(embeddingText, "embed_fact");
 
   const result = await query(
     `INSERT INTO entity_facts (entity_id, predicate, object_value_json, object_display_text, status, review_state, confidence, source_kind, valid_at_start, valid_at_end, embedding)
@@ -204,7 +204,7 @@ factsRouter.patch("/:factId", async (c) => {
       `SELECT canonical_name FROM entities WHERE id = $1`, [entityId],
     );
     const embeddingText = renderFactEmbeddingText(entityResult.rows[0].canonical_name, newPredicate, newDisplayText);
-    const embedding = await generateEmbedding(embeddingText);
+    const embedding = await generateEmbedding(embeddingText, "embed_fact");
     updates.push(`embedding = $${paramIdx}`);
     params.push(pgvector.toSql(embedding));
     paramIdx++;

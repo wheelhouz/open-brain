@@ -51,7 +51,7 @@ export async function buildEntityGroundingContext(
   const entity = entityResult.rows[0];
 
   // 2. Embed user query for fact matching
-  const queryEmbedding = await generateEmbedding(userQuery);
+  const queryEmbedding = await generateEmbedding(userQuery, "embed_entity_query");
   const embeddingSql = pgvector.toSql(queryEmbedding);
 
   // 2a. Always include disputed facts

@@ -74,7 +74,7 @@ export async function capturePipeline(
 ): Promise<CaptureResult> {
   // Run embedding + metadata extraction in parallel
   const [embedding, metadata] = await Promise.all([
-    generateEmbedding(content),
+    generateEmbedding(content, "embed_thought"),
     extractMetadata(content).catch((err) => {
       logger.warn({ event: "pipeline_enrichment_failed", step: "extract_metadata", err: String(err) });
       return {
@@ -198,7 +198,7 @@ export async function updatePipeline(
 
   if (reprocess) {
     const [embedding, metadata] = await Promise.all([
-      generateEmbedding(content),
+      generateEmbedding(content, "embed_thought"),
       extractMetadata(content).catch((err) => {
         logger.warn({ event: "pipeline_enrichment_failed", step: "extract_metadata_update", err: String(err) });
         return null;

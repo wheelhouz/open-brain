@@ -1,6 +1,6 @@
 import { query } from "./db.js";
 import { config } from "./config.js";
-import { generateEmbedding } from "./openrouter.js";
+import { generateEmbedding, sourceContext } from "./openrouter.js";
 import { logger } from "./logger.js";
 import pgvector from "pgvector";
 
@@ -95,8 +95,10 @@ async function processJob(
 
     const loop = loopResult.rows[0] as { id: string; content: string };
 
-    // Generate embedding
-    const embedding = await generateEmbedding(loop.content);
+    // Generate embedding (wrapped in queue source context)
+    const embedding = await sourceContext.run("queue", () =>
+      generateEmbedding(loop.content, "embed_loop"),
+    );
 
     // Write embedding to loop row
     await query(

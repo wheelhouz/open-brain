@@ -227,7 +227,7 @@ chatRouter.post("/", async (c) => {
     })),
   ];
 
-  const stream = chatCompletionStream(llmMessages);
+  const stream = chatCompletionStream(llmMessages, undefined, "chat_stream");
   const reader = stream.getReader();
 
   // Stream SSE response

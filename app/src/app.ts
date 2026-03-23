@@ -25,6 +25,7 @@ import { entitiesRouter } from "./routes/entities.js";
 import { pendingFactsRouter } from "./routes/facts.js";
 import { backfillRouter } from "./routes/backfill.js";
 import { oauthRouter, wellKnownOAuth } from "./routes/oauth.js";
+import { sourceContext } from "./openrouter.js";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
@@ -76,6 +77,9 @@ app.route("/oauth", oauthRouter);
 
 // MCP endpoint — handles its own auth, rate limited separately (30/min)
 app.use("/mcp", rateLimit(30, 60_000));
+app.use("/mcp/*", async (c, next) => {
+  return sourceContext.run("mcp", () => next());
+});
 app.route("/mcp", mcpRouter);
 
 // Health check — no auth required
@@ -90,6 +94,9 @@ app.get("/health", async (c) => {
 // All API routes require auth, rate limited (60/min)
 const api = new Hono();
 api.use("*", rateLimit(60, 60_000));
+api.use("*", async (c, next) => {
+  return sourceContext.run("rest", () => next());
+});
 api.use("*", auth);
 api.route("/capture", captureRouter);
 api.route("/search", searchRouter);

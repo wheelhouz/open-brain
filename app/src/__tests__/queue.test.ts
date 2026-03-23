@@ -8,9 +8,13 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    generateEmbedding: vi.fn().mockResolvedValue(new Array(1536).fill(0)),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 vi.mock("pgvector", () => ({
   default: { toSql: vi.fn((v: number[]) => `[${v.join(",")}]`) },

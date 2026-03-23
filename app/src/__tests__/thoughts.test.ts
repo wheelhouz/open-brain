@@ -17,17 +17,21 @@ vi.mock("../db.js", () => ({
   isHealthy: vi.fn().mockResolvedValue(true),
 }));
 
-vi.mock("../openrouter.js", () => ({
-  generateEmbedding: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
-  extractMetadata: vi.fn().mockResolvedValue({
-    type: "idea",
-    topics: ["testing"],
-    people: [],
-    action_items: [],
-    dates_mentioned: [],
-    source_context: null,
-  }),
-}));
+vi.mock("../openrouter.js", () => {
+  const { AsyncLocalStorage } = require("node:async_hooks");
+  return {
+    generateEmbedding: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+    extractMetadata: vi.fn().mockResolvedValue({
+      type: "idea",
+      topics: ["testing"],
+      people: [],
+      action_items: [],
+      dates_mentioned: [],
+      source_context: null,
+    }),
+    sourceContext: new AsyncLocalStorage(),
+  };
+});
 
 vi.mock("pgvector", () => ({
   default: { toSql: (v: number[]) => `[${v.join(",")}]` },
