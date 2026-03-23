@@ -3,6 +3,13 @@ import type { Context, Next } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { isHealthy } from "./db.js";
 import { auth } from "./middleware/auth.js";
+import { requestLog } from "./middleware/requestLog.js";
+
+declare module "hono" {
+  interface ContextVariableMap {
+    reqId: string;
+  }
+}
 import { captureRouter } from "./routes/capture.js";
 import { searchRouter } from "./routes/search.js";
 import { thoughtsRouter } from "./routes/thoughts.js";
@@ -30,6 +37,9 @@ app.use("*", async (c: Context, next: Next) => {
   c.header("X-Frame-Options", "DENY");
   c.header("Referrer-Policy", "strict-origin-when-cross-origin");
 });
+
+// Request logging
+app.use("*", requestLog);
 
 // Global error handler
 app.onError((err, c) => {
