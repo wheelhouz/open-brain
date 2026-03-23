@@ -5,44 +5,23 @@ import { api, type StatsResponse } from "../api";
 import { StatCard } from "../components/StatCard";
 import { ActivityChart } from "../components/ActivityChart";
 import { typeColor } from "../lib/format";
-import { Brain, Calendar, Hash, Users } from "lucide-preact";
+import { Brain, Calendar, Hash, Users, BarChart3, DollarSign } from "lucide-preact";
+import { SpendPanel } from "./SpendView";
 
-export function StatsView(_props: RoutableProps) {
-  const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+type Tab = "stats" | "spend";
 
-  useEffect(() => {
-    api
-      .stats()
-      .then(setStats)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+const subTabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
+  { id: "stats", label: "Stats", icon: BarChart3 },
+  { id: "spend", label: "AI Spend", icon: DollarSign },
+];
 
-  if (loading) {
-    return (
-      <div class="p-4">
-        <p class="text-[var(--text-muted)] text-sm">Loading stats...</p>
-      </div>
-    );
-  }
-
-  if (!stats) {
-    return (
-      <div class="p-4 text-center py-12">
-        <p class="text-[var(--text-muted)]">Failed to load stats</p>
-      </div>
-    );
-  }
-
+function StatsPanel({ stats }: { stats: StatsResponse }) {
   const totalTopics = stats.topics.length;
   const totalPeople = stats.people.length;
   const totalDays = stats.daily.length;
 
   return (
-    <div class="p-4">
-      <h2 class="text-lg font-semibold text-[var(--text-primary)] mb-4">Stats</h2>
-
+    <>
       {/* Metric cards */}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <StatCard
@@ -161,6 +140,71 @@ export function StatsView(_props: RoutableProps) {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+export function StatsView(_props: RoutableProps) {
+  const [activeTab, setActiveTab] = useState<Tab>(
+    window.location.hash === "#spend" ? "spend" : "stats"
+  );
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api
+      .stats()
+      .then(setStats)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const switchTab = (tab: Tab) => {
+    setActiveTab(tab);
+    window.history.replaceState(null, "", `/stats${tab === "spend" ? "#spend" : ""}`);
+  };
+
+  return (
+    <div class="p-4">
+      {/* Segmented control */}
+      <div class="mb-4">
+        <div class="inline-flex gap-1 p-1 rounded-lg bg-[var(--bg-tertiary)]">
+          {subTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => switchTab(tab.id)}
+                class={`flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-md transition-all ${
+                  isActive
+                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-sm"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                }`}
+              >
+                <tab.icon class="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+
+
+      {/* Tab content */}
+      {activeTab === "stats" ? (
+        loading ? (
+          <p class="text-[var(--text-muted)] text-sm">Loading stats...</p>
+        ) : stats ? (
+          <StatsPanel stats={stats} />
+        ) : (
+          <div class="text-center py-12">
+            <p class="text-[var(--text-muted)]">Failed to load stats</p>
+          </div>
+        )
+      ) : (
+        <SpendPanel />
+      )}
     </div>
   );
 }
