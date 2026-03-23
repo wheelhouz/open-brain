@@ -1,6 +1,7 @@
 import { query } from "./db.js";
 import { config } from "./config.js";
 import { generateEmbedding } from "./openrouter.js";
+import { logger } from "./logger.js";
 import pgvector from "pgvector";
 
 const MAX_ATTEMPTS = 5;
@@ -26,7 +27,7 @@ export async function enqueueEmbeddingJob(
   );
   const pendingCount = parseInt(countResult.rows[0]?.count || "0", 10);
   if (pendingCount >= MAX_PENDING_JOBS) {
-    console.warn(`[queue] Queue depth cap reached (${pendingCount} pending jobs), skipping enqueue for loop ${loopId}`);
+    logger.warn({ event: "queue_depth_cap", pendingCount, loopId });
     return;
   }
 
@@ -74,6 +75,7 @@ async function processJob(
 ): Promise<void> {
   const jobId = job.id as string;
   const payload = job.payload_json as { loop_id: string; target_model: string };
+  const start = Date.now();
 
   try {
     // Fetch loop content
@@ -109,6 +111,8 @@ async function processJob(
       `UPDATE embedding_jobs SET status = 'complete', completed_at = now() WHERE id = $1`,
       [jobId],
     );
+
+    logger.info({ event: "job_completed", jobId, loopId: payload.loop_id, latencyMs: Date.now() - start });
   } catch (err) {
     const attemptCount = job.attempt_count as number;
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -117,6 +121,7 @@ async function processJob(
         `UPDATE embedding_jobs SET status = 'failed', last_error = $1, completed_at = now() WHERE id = $2`,
         [errorMsg, jobId],
       );
+      logger.error({ event: "job_permanently_failed", jobId, loopId: payload.loop_id, attempts: attemptCount });
     } else {
       // Reset to pending with backoff
       await query(
@@ -127,7 +132,7 @@ async function processJob(
         [errorMsg, attemptCount, jobId],
       );
     }
-    console.error(`[queue] Job ${jobId} failed:`, err);
+    logger.error({ event: "job_failed", jobId, loopId: payload.loop_id, err: errorMsg });
   }
 }
 
@@ -153,7 +158,7 @@ async function drain(): Promise<void> {
       job = await claimNextJob("loop_embedding");
     }
   } catch (err) {
-    console.error("[queue] drain error:", err);
+    logger.error({ event: "queue_drain_error", err: err instanceof Error ? err.message : String(err) });
   } finally {
     running = false;
   }

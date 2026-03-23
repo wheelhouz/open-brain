@@ -138,18 +138,15 @@ describe("searchWithReranking", () => {
     expect(result.thoughts[0].thread![0].content).toBe("Child note");
   });
 
-  it("logs diagnostics", async () => {
-    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  it("returns diagnostics", async () => {
     mockQuery.mockResolvedValue({ rows: [] });
 
-    await searchWithReranking({ query: "test" });
+    const result = await searchWithReranking({ query: "test" });
 
-    expect(consoleSpy).toHaveBeenCalled();
-    const logged = JSON.parse(consoleSpy.mock.calls[0][0] as string);
-    expect(logged.event).toBe("rag_retrieval");
-    expect(logged.rewrittenQuery).toBe("test");
-    expect(typeof logged.latencyMs).toBe("number");
-    consoleSpy.mockRestore();
+    expect(result.diagnostics.rewrittenQuery).toBe("test");
+    expect(typeof result.diagnostics.latencyMs).toBe("number");
+    expect(result.diagnostics.candidateCount).toBe(0);
+    expect(result.diagnostics.finalCount).toBe(0);
   });
 });
 

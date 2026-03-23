@@ -51,16 +51,12 @@ describe("enqueueEmbeddingJob", () => {
   });
 
   it("skips insert when queue depth cap is reached", async () => {
-    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     mockQuery.mockResolvedValueOnce({ rows: [{ count: "500" }] });
 
     await enqueueEmbeddingJob("loop-1", "openai/text-embedding-3-small");
 
+    // Only the count query should be called — no INSERT
     expect(mockQuery).toHaveBeenCalledOnce();
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Queue depth cap reached"),
-    );
-    consoleSpy.mockRestore();
   });
 });
 

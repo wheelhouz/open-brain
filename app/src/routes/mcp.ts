@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer } from "../mcp.js";
 import { validateAccessKey } from "../auth.js";
+import { logger } from "../logger.js";
 
 export const mcpRouter = new Hono();
 
@@ -36,10 +37,11 @@ mcpRouter.all("/", async (c) => {
   const token = header?.startsWith("Bearer ") ? header.slice(7) : queryKey;
 
   if (queryKey && !header) {
-    console.warn("[deprecation] MCP auth via ?key= query param — use Authorization header instead");
+    logger.warn({ event: "mcp_auth_deprecation", msg: "MCP auth via ?key= query param — use Authorization header instead" });
   }
 
   if (!token || !validateAccessKey(token)) {
+    logger.warn({ event: "auth_failure", path: "/mcp", method: c.req.method });
     return c.json({ error: "Unauthorized" }, 401);
   }
 
