@@ -35,6 +35,10 @@ mcpRouter.all("/", async (c) => {
   const queryKey = c.req.query("key");
   const token = header?.startsWith("Bearer ") ? header.slice(7) : queryKey;
 
+  if (queryKey && !header) {
+    console.warn("[deprecation] MCP auth via ?key= query param — use Authorization header instead");
+  }
+
   if (!token || !validateAccessKey(token)) {
     return c.json({ error: "Unauthorized" }, 401);
   }

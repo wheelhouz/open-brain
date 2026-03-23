@@ -6,10 +6,6 @@ const oauthRouter = new Hono();
 
 // In-memory stores (single-user app, no persistence needed)
 const authCodes = new Map<string, { expiresAt: number; redirectUri: string }>();
-const registeredClients = new Map<
-  string,
-  { clientSecret: string; redirectUris: string[] }
->();
 
 function getOrigin(c: { req: { header: (name: string) => string | undefined; url: string } }): string {
   const proto = c.req.header("x-forwarded-proto") || "http";
@@ -46,8 +42,6 @@ oauthRouter.post("/register", async (c) => {
   const clientId = crypto.randomUUID();
   const clientSecret = crypto.randomUUID();
   const redirectUris: string[] = body.redirect_uris || [];
-
-  registeredClients.set(clientId, { clientSecret, redirectUris });
 
   return c.json(
     {
