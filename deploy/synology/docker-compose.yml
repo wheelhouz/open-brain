@@ -1,9 +1,24 @@
 services:
-  # --- Config init: copies monitoring configs from image to shared volume ---
+  # --- Init containers ---
   config-init:
     image: ${CONFIG_IMAGE:-ghcr.io/wheelhouz/open-brain-config:latest}
     volumes:
       - monitoring_config:/out
+    restart: "no"
+
+  permissions-init:
+    image: busybox:1.37
+    volumes:
+      - /volume1/docker/open-brain/prometheus:/data/prometheus
+      - /volume1/docker/open-brain/grafana:/data/grafana
+      - /volume1/docker/open-brain/loki:/data/loki
+    command: >
+      sh -c "
+        chown -R 65534:65534 /data/prometheus &&
+        chown -R 472:472 /data/grafana &&
+        chown -R 10001:10001 /data/loki &&
+        echo 'Permissions set'
+      "
     restart: "no"
 
   # --- Core services ---
@@ -60,6 +75,8 @@ services:
     depends_on:
       config-init:
         condition: service_completed_successfully
+      permissions-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
@@ -78,6 +95,8 @@ services:
     depends_on:
       config-init:
         condition: service_completed_successfully
+      permissions-init:
+        condition: service_completed_successfully
     networks:
       - brain-net
     restart: unless-stopped
@@ -90,6 +109,8 @@ services:
       - /volume1/docker/open-brain/loki:/loki
     depends_on:
       config-init:
+        condition: service_completed_successfully
+      permissions-init:
         condition: service_completed_successfully
     networks:
       - brain-net
@@ -104,6 +125,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       config-init:
+        condition: service_completed_successfully
+      permissions-init:
         condition: service_completed_successfully
     networks:
       - brain-net
