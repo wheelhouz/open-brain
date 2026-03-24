@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "preact/hooks";
+import { useState, useEffect, useCallback, useRef, useMemo } from "preact/hooks";
 import type { RoutableProps } from "../lib/route";
 import { api, type Loop, type LoopsResponse } from "../api";
 import { showToast, selectedLoopId } from "../state";
 import { LoopCard } from "../components/LoopCard";
 import { SwipeableLoopCard } from "../components/SwipeableLoopCard";
 import { useUrlSignal } from "../hooks/useUrlSignal";
+import { ListChecks, X, Check, AlarmClock, ChevronRight } from "lucide-preact";
 
 const statusTabs = [
   { value: "open", label: "Open" },
@@ -179,6 +180,39 @@ export function LoopsView(_props: RoutableProps) {
   const [refreshKey, setRefreshKey] = useState(0);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleCollapse = useCallback((label: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  }, []);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [showSnoozePresets, setShowSnoozePresets] = useState(false);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelected(new Set());
+    setSelectMode(false);
+    setShowSnoozePresets(false);
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelected(new Set(loops.map((l) => l.id)));
+  }, [loops]);
+
   const counts = useLoopCounts(refreshKey);
 
   const loadLoops = useCallback(() => {
@@ -200,6 +234,55 @@ export function LoopsView(_props: RoutableProps) {
     loadLoops();
     setRefreshKey((k) => k + 1);
   }, [loadLoops]);
+
+  const handleBulkClose = useCallback(async () => {
+    if (selected.size === 0) return;
+    setBulkLoading(true);
+    try {
+      const result = await api.bulkUpdateLoops([...selected], "close");
+      showToast(`Closed ${result.updated} loop${result.updated !== 1 ? "s" : ""}`, "success");
+      clearSelection();
+      onLoopChanged();
+    } catch {
+      showToast("Failed to close loops", "error");
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [selected, clearSelection, onLoopChanged]);
+
+  const handleBulkSnooze = useCallback(async (days: number) => {
+    if (selected.size === 0) return;
+    setBulkLoading(true);
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const until = d.toISOString().slice(0, 10);
+    try {
+      const result = await api.bulkUpdateLoops([...selected], "snooze", { until });
+      showToast(`Snoozed ${result.updated} loop${result.updated !== 1 ? "s" : ""}`, "success");
+      clearSelection();
+      onLoopChanged();
+    } catch {
+      showToast("Failed to snooze loops", "error");
+    } finally {
+      setBulkLoading(false);
+      setShowSnoozePresets(false);
+    }
+  }, [selected, clearSelection, onLoopChanged]);
+
+  const handleBulkReopen = useCallback(async () => {
+    if (selected.size === 0) return;
+    setBulkLoading(true);
+    try {
+      const result = await api.bulkUpdateLoops([...selected], "reopen");
+      showToast(`Reopened ${result.updated} loop${result.updated !== 1 ? "s" : ""}`, "success");
+      clearSelection();
+      onLoopChanged();
+    } catch {
+      showToast("Failed to reopen loops", "error");
+    } finally {
+      setBulkLoading(false);
+    }
+  }, [selected, clearSelection, onLoopChanged]);
 
   // Refresh list when loop detail panel closes (loop may have been modified)
   const prevLoopId = useRef(selectedLoopId.value);
@@ -249,14 +332,28 @@ export function LoopsView(_props: RoutableProps) {
     return () => observer.disconnect();
   }, [nextCursor, loadMore]);
 
+  // Auto-collapse low-priority groups on initial load
+  const autoCollapsedRef = useRef<string | null>(null);
+  const sorted = sortLoops(loops, sort);
+  const groups = groupLoops(sorted, status);
+
+  useEffect(() => {
+    const key = `${status}-${loops.length}`;
+    if (autoCollapsedRef.current === key) return;
+    autoCollapsedRef.current = key;
+    const autoCollapse = new Set<string>();
+    const lowPriority = new Set(["Dormant", "Older"]);
+    for (const g of groups) {
+      if (lowPriority.has(g.label)) autoCollapse.add(g.label);
+    }
+    if (autoCollapse.size > 0) setCollapsed(autoCollapse);
+  }, [status, loops.length]);
+
   const emptyMessages: Record<string, string> = {
     open: "No open loops. You're all caught up!",
     snoozed: "No snoozed loops",
     closed: "No closed loops yet",
   };
-
-  const sorted = sortLoops(loops, sort);
-  const groups = groupLoops(sorted, status);
 
   return (
     <div class="p-4">
@@ -299,6 +396,20 @@ export function LoopsView(_props: RoutableProps) {
             </button>
           ))}
         </div>
+        <button
+          onClick={() => {
+            if (selectMode) clearSelection();
+            else setSelectMode(true);
+          }}
+          class={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg transition-colors ${
+            selectMode
+              ? "bg-[var(--accent)]/20 text-[var(--accent)] border border-[var(--accent)]/30"
+              : "bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+          }`}
+        >
+          <ListChecks class="w-3.5 h-3.5" />
+          {selectMode ? "Cancel" : "Select"}
+        </button>
         <select
           value={sort}
           onChange={(e) => setSort((e.target as HTMLSelectElement).value as SortOption)}
@@ -320,32 +431,49 @@ export function LoopsView(_props: RoutableProps) {
         <div class="space-y-4">
           {groups.map((group) => (
             <div key={group.label}>
-              <h3 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-2">
-                {group.label} ({group.loops.length})
-              </h3>
-              <div class="space-y-2">
-                {group.loops.map((loop) => {
-                  const card = (
-                    <LoopCard
-                      key={loop.id}
-                      loop={loop}
-                      selected={selectedLoopId.value === loop.id}
-                      onClick={() => { selectedLoopId.value = loop.id; }}
-                      onChanged={onLoopChanged}
-                    />
-                  );
-                  return isMobile ? (
-                    <SwipeableLoopCard
-                      key={loop.id}
-                      loop={loop}
-                      onChanged={onLoopChanged}
-                      onDelete={() => handleSwipeDelete(loop.id)}
-                    >
-                      {card}
-                    </SwipeableLoopCard>
-                  ) : card;
-                })}
-              </div>
+              <button
+                onClick={() => toggleCollapse(group.label)}
+                class={`flex items-center gap-1.5 group cursor-pointer w-full text-left ${
+                  collapsed.has(group.label) ? "" : "mb-2"
+                }`}
+              >
+                <ChevronRight
+                  class={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-200 ${
+                    collapsed.has(group.label) ? "" : "rotate-90"
+                  }`}
+                />
+                <h3 class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider group-hover:text-[var(--text-secondary)] transition-colors">
+                  {group.label} ({group.loops.length})
+                </h3>
+              </button>
+              {!collapsed.has(group.label) && (
+                <div class="space-y-2">
+                  {group.loops.map((loop) => {
+                    const card = (
+                      <LoopCard
+                        key={loop.id}
+                        loop={loop}
+                        selected={selectedLoopId.value === loop.id}
+                        selectable={selectMode}
+                        checked={selected.has(loop.id)}
+                        onToggleSelect={() => toggleSelect(loop.id)}
+                        onClick={() => { selectedLoopId.value = loop.id; }}
+                        onChanged={onLoopChanged}
+                      />
+                    );
+                    return isMobile && !selectMode ? (
+                      <SwipeableLoopCard
+                        key={loop.id}
+                        loop={loop}
+                        onChanged={onLoopChanged}
+                        onDelete={() => handleSwipeDelete(loop.id)}
+                      >
+                        {card}
+                      </SwipeableLoopCard>
+                    ) : card;
+                  })}
+                </div>
+              )}
             </div>
           ))}
           {/* Infinite scroll sentinel */}
@@ -357,6 +485,76 @@ export function LoopsView(_props: RoutableProps) {
         </div>
       )}
 
+      {/* Bulk action bar */}
+      {selectMode && selected.size > 0 && (
+        <div class="fixed bottom-14 sm:bottom-0 left-0 right-0 z-50 bg-[var(--surface)] border-t border-[var(--border-color)] shadow-lg">
+          <div class="flex items-center justify-between px-4 py-3 max-w-2xl mx-auto gap-2">
+            <div class="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+              <span class="font-medium">{selected.size} selected</span>
+              <button
+                onClick={selectAll}
+                class="text-xs text-[var(--accent)] hover:underline"
+              >
+                Select all
+              </button>
+            </div>
+            <div class="flex items-center gap-2 relative">
+              {status === "closed" ? (
+                <button
+                  onClick={handleBulkReopen}
+                  disabled={bulkLoading}
+                  class="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                >
+                  Reopen
+                </button>
+              ) : (
+                <>
+                  <div class="relative">
+                    <button
+                      onClick={() => setShowSnoozePresets(!showSnoozePresets)}
+                      disabled={bulkLoading}
+                      class="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 disabled:opacity-50 transition-colors"
+                    >
+                      <AlarmClock class="w-3.5 h-3.5" />
+                      Snooze
+                    </button>
+                    {showSnoozePresets && (
+                      <div class="absolute bottom-full right-0 mb-2 bg-[var(--surface)] border border-[var(--border-color)] rounded-lg shadow-lg py-1 min-w-[160px] z-40">
+                        <button onClick={() => handleBulkSnooze(1)} class="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
+                          Tomorrow
+                        </button>
+                        <button onClick={() => handleBulkSnooze(7)} class="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
+                          Next week
+                        </button>
+                        <button onClick={() => handleBulkSnooze(14)} class="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
+                          2 weeks
+                        </button>
+                        <button onClick={() => handleBulkSnooze(30)} class="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]">
+                          1 month
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleBulkClose}
+                    disabled={bulkLoading}
+                    class="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg bg-green-600/15 text-green-400 hover:bg-green-600/25 disabled:opacity-50 transition-colors"
+                  >
+                    <Check class="w-3.5 h-3.5" />
+                    Close
+                  </button>
+                </>
+              )}
+              <button
+                onClick={clearSelection}
+                class="flex items-center gap-1 text-xs px-2 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

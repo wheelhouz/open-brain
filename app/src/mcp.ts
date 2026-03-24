@@ -10,6 +10,7 @@ import { normalizePredicate, renderFactEmbeddingText } from "./facts.js";
 import { logger } from "./logger.js";
 import pgvector from "pgvector";
 import { mcpToolCallsTotal, mcpToolDuration } from "./metrics.js";
+import { parseSnoozeDate } from "./parse-duration.js";
 
 function withAudit<T, R>(tool: string, fn: (args: T) => Promise<R>) {
   return async (args: T): Promise<R> => {
@@ -412,8 +413,9 @@ export function createMcpServer(): McpServer {
       status: z.enum(["open", "closed", "snoozed"]).default("open").describe("Filter by status"),
       loop_type: z.enum(["task", "question", "decision", "waiting_on"]).optional().describe("Filter by loop type"),
       limit: z.number().default(20).describe("Max results"),
+      cursor: z.string().optional().describe("Pagination cursor (created_at timestamp from previous page)"),
     },
-    withAudit("list_open_loops", async ({ status, loop_type, limit }) => {
+    withAudit("list_open_loops", async ({ status, loop_type, limit, cursor }) => {
       const conditions: string[] = [];
       const params: unknown[] = [];
       let idx = 1;
@@ -430,10 +432,16 @@ export function createMcpServer(): McpServer {
         params.push(loop_type);
       }
 
-      params.push(Math.min(limit, 100));
+      if (cursor) {
+        conditions.push(`created_at < $${idx++}`);
+        params.push(cursor);
+      }
+
+      const cappedLimit = Math.min(limit, 100);
+      params.push(cappedLimit + 1);
 
       const result = await query(
-        `SELECT id, content, loop_type, status, resolution, source_thought_id, created_at, closed_at
+        `SELECT id, content, loop_type, status, resolution, source_thought_id, snoozed_until, created_at, closed_at
          FROM open_loops
          WHERE ${conditions.join(" AND ")}
          ORDER BY created_at DESC
@@ -441,8 +449,14 @@ export function createMcpServer(): McpServer {
         params,
       );
 
+      const hasMore = result.rows.length > cappedLimit;
+      const loops = result.rows.slice(0, cappedLimit);
+
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result.rows, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify({
+          loops,
+          next_cursor: hasMore ? loops[loops.length - 1].created_at : null,
+        }, null, 2) }],
       };
     }),
   );
@@ -481,15 +495,17 @@ export function createMcpServer(): McpServer {
     "Snooze a loop until a future date. It will auto-surface in the open list after that date.",
     {
       id: z.string().describe("The loop UUID"),
-      until: z.string().describe("ISO 8601 date to snooze until (e.g. 2026-03-21)"),
+      until: z.string().describe("ISO 8601 date (e.g. 2026-03-21) or relative duration (3d, 2w, 1m)"),
     },
     withAudit("snooze_loop", async ({ id, until }) => {
-      // Validate ISO date format
-      if (!/^\d{4}-\d{2}-\d{2}(T[\d:.]+Z?)?$/.test(until) || isNaN(Date.parse(until))) {
+      let resolvedDate: string;
+      try {
+        resolvedDate = parseSnoozeDate(until);
+      } catch {
         return {
           content: [{
             type: "text" as const,
-            text: JSON.stringify({ error: "Invalid date format. Expected ISO 8601 date (e.g. 2026-03-21)" }),
+            text: JSON.stringify({ error: "Invalid date format. Expected ISO date (2026-03-21) or relative duration (3d, 2w, 1m)." }),
           }],
           isError: true,
         };
@@ -499,7 +515,7 @@ export function createMcpServer(): McpServer {
         `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
          WHERE id = $1 AND status != 'closed'
          RETURNING id, content, status, snoozed_until`,
-        [id, until],
+        [id, resolvedDate],
       );
 
       if (result.rows.length === 0) {
@@ -510,6 +526,70 @@ export function createMcpServer(): McpServer {
 
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result.rows[0], null, 2) }],
+      };
+    }),
+  );
+
+  // bulk_update_loops
+  server.tool(
+    "bulk_update_loops",
+    "Update multiple loops in a single call. Supports snooze, close, and reopen actions.",
+    {
+      ids: z.array(z.string()).min(1).max(50).describe("Array of loop UUIDs"),
+      action: z.enum(["snooze", "close", "reopen"]).describe("Action to apply to all loops"),
+      until: z.string().optional().describe("Snooze date — ISO 8601 (2026-03-21) or relative (3d, 2w, 1m). Required when action is 'snooze'."),
+      resolution: z.string().optional().describe("Resolution note (used with close action)"),
+    },
+    withAudit("bulk_update_loops", async ({ ids, action, until, resolution }) => {
+      if (action === "snooze" && !until) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: "until is required when action is 'snooze'" }) }],
+          isError: true,
+        };
+      }
+
+      let resolvedDate: string | undefined;
+      if (action === "snooze") {
+        try {
+          resolvedDate = parseSnoozeDate(until!);
+        } catch {
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ error: "Invalid date format. Expected ISO date (2026-03-21) or relative duration (3d, 2w, 1m)." }) }],
+            isError: true,
+          };
+        }
+      }
+
+      let sql: string;
+      let params: unknown[];
+
+      switch (action) {
+        case "snooze":
+          sql = `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
+                 WHERE id = ANY($1::uuid[]) AND status != 'closed'
+                 RETURNING id`;
+          params = [ids, resolvedDate];
+          break;
+        case "close":
+          sql = `UPDATE open_loops SET status = 'closed', closed_at = now(), resolution = $2
+                 WHERE id = ANY($1::uuid[]) AND status != 'closed'
+                 RETURNING id`;
+          params = [ids, resolution || null];
+          break;
+        case "reopen":
+          sql = `UPDATE open_loops SET status = 'open', closed_at = NULL, snoozed_until = NULL
+                 WHERE id = ANY($1::uuid[])
+                 RETURNING id`;
+          params = [ids];
+          break;
+      }
+
+      const result = await query<{ id: string }>(sql!, params!);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          updated: result.rows.length,
+          ids: result.rows.map((r) => r.id),
+        }, null, 2) }],
       };
     }),
   );

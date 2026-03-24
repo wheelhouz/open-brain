@@ -4,7 +4,7 @@ import { api } from "../api";
 import { relativeTime } from "../lib/format";
 import { extractHeadline } from "../lib/markdown";
 import { showToast } from "../state";
-import { CheckSquare, HelpCircle, Scale, Clock, MoreVertical, Check, AlarmClock, RotateCcw } from "lucide-preact";
+import { CheckSquare, HelpCircle, Scale, Clock, MoreVertical, Check, AlarmClock, RotateCcw, Circle, CircleCheck } from "lucide-preact";
 
 const typeIcons = {
   task: CheckSquare,
@@ -34,6 +34,9 @@ interface LoopCardProps {
   onClick?: () => void;
   onChanged?: () => void;
   selected?: boolean;
+  selectable?: boolean;
+  checked?: boolean;
+  onToggleSelect?: () => void;
 }
 
 function isDueNow(loop: Loop): boolean {
@@ -157,7 +160,7 @@ function QuickActions({ loop, onChanged }: { loop: Loop; onChanged?: () => void 
   );
 }
 
-export function LoopCard({ loop, onClick, onChanged, selected }: LoopCardProps) {
+export function LoopCard({ loop, onClick, onChanged, selected, selectable, checked, onToggleSelect }: LoopCardProps) {
   const Icon = typeIcons[loop.loop_type];
   const color = typeColors[loop.loop_type];
   const isClosed = loop.status === "closed";
@@ -178,18 +181,34 @@ export function LoopCard({ loop, onClick, onChanged, selected }: LoopCardProps) 
   const needsAction = loop.status !== "closed" && (loop.loop_type === "question" || loop.loop_type === "decision");
   const actionLabel = loop.loop_type === "question" ? "Needs answer" : "Needs decision";
 
+  const handleClick = selectable
+    ? (e: Event) => { e.stopPropagation(); onToggleSelect?.(); }
+    : onClick;
+
   return (
     <div
-      onClick={onClick}
+      onClick={handleClick}
       class={`w-full text-left p-3 rounded-lg border-r border-y transition-colors cursor-pointer ${
-        selected
+        selected || checked
           ? "bg-[var(--accent)]/10 border-[var(--accent)] border-l-[var(--accent)]"
           : "bg-[var(--surface)] border-[var(--border-color)] hover:bg-[var(--surface-hover)]"
       } ${isClosed ? "opacity-60" : ""}`}
-      style={!selected ? { borderLeftWidth: "2px", borderLeftStyle: "solid", borderLeftColor: color } : { borderLeftWidth: "2px", borderLeftStyle: "solid" }}
+      style={!(selected || checked) ? { borderLeftWidth: "2px", borderLeftStyle: "solid", borderLeftColor: color } : { borderLeftWidth: "2px", borderLeftStyle: "solid" }}
     >
       <div class="flex items-start gap-2">
-        <Icon class="w-4 h-4 mt-0.5 shrink-0" style={{ color }} />
+        {selectable ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+            class="mt-0.5 shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+          >
+            {checked
+              ? <CircleCheck class="w-4 h-4 text-[var(--accent)]" />
+              : <Circle class="w-4 h-4" />
+            }
+          </button>
+        ) : (
+          <Icon class="w-4 h-4 mt-0.5 shrink-0" style={{ color }} />
+        )}
         <div class="flex-1 min-w-0">
           {/* Headline + time + actions */}
           <div class="flex items-center justify-between gap-2 mb-0.5">
