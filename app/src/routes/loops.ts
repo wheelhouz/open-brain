@@ -1,7 +1,45 @@
 import { Hono } from "hono";
 import { query } from "../db.js";
+import { parseSnoozeDate } from "../parse-duration.js";
 
 export const loopsRouter = new Hono();
+
+export type BulkAction = "snooze" | "close" | "reopen";
+
+export async function bulkUpdateLoops(
+  ids: string[],
+  action: BulkAction,
+  opts?: { until?: string; resolution?: string },
+): Promise<{ updated: number; ids: string[] }> {
+  let sql: string;
+  let params: unknown[];
+
+  switch (action) {
+    case "snooze": {
+      const resolvedDate = parseSnoozeDate(opts?.until || "");
+      sql = `UPDATE open_loops SET status = 'snoozed', snoozed_until = $2
+             WHERE id = ANY($1::uuid[]) AND status != 'closed'
+             RETURNING id`;
+      params = [ids, resolvedDate];
+      break;
+    }
+    case "close":
+      sql = `UPDATE open_loops SET status = 'closed', closed_at = now(), resolution = $2
+             WHERE id = ANY($1::uuid[]) AND status != 'closed'
+             RETURNING id`;
+      params = [ids, opts?.resolution || null];
+      break;
+    case "reopen":
+      sql = `UPDATE open_loops SET status = 'open', closed_at = NULL, snoozed_until = NULL
+             WHERE id = ANY($1::uuid[])
+             RETURNING id`;
+      params = [ids];
+      break;
+  }
+
+  const result = await query<{ id: string }>(sql, params);
+  return { updated: result.rows.length, ids: result.rows.map((r) => r.id) };
+}
 
 // List loops with status/type filter and cursor pagination
 loopsRouter.get("/", async (c) => {
@@ -79,6 +117,42 @@ loopsRouter.get("/", async (c) => {
     loops,
     next_cursor: hasMore ? loops[loops.length - 1].created_at : null,
   });
+});
+
+// Bulk update loops
+loopsRouter.post("/bulk", async (c) => {
+  const body = await c.req.json<{
+    ids: string[];
+    action: string;
+    until?: string;
+    resolution?: string;
+  }>();
+
+  if (!Array.isArray(body.ids) || body.ids.length === 0) {
+    return c.json({ error: "ids must be a non-empty array" }, 400);
+  }
+  if (body.ids.length > 50) {
+    return c.json({ error: "Maximum 50 IDs per bulk operation" }, 400);
+  }
+
+  const validActions = ["snooze", "close", "reopen"];
+  if (!validActions.includes(body.action)) {
+    return c.json({ error: `Invalid action. Must be one of: ${validActions.join(", ")}` }, 400);
+  }
+
+  if (body.action === "snooze" && !body.until) {
+    return c.json({ error: "until is required when action is 'snooze'" }, 400);
+  }
+
+  try {
+    const result = await bulkUpdateLoops(body.ids, body.action as BulkAction, {
+      until: body.until,
+      resolution: body.resolution,
+    });
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Bulk update failed" }, 400);
+  }
 });
 
 // Get single loop with evidence thoughts

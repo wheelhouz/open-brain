@@ -345,6 +345,13 @@ export const api = {
       method: "DELETE",
     }),
 
+  bulkUpdateLoops: (ids: string[], action: "snooze" | "close" | "reopen", opts?: { until?: string; resolution?: string }) =>
+    request<{ updated: number; ids: string[] }>("/api/loops/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids, action, ...opts }),
+    }),
+
   linkEvidence: (loopId: string, thoughtId: string) =>
     request<{ linked: boolean }>(`/api/loops/${loopId}/evidence`, {
       method: "POST",
