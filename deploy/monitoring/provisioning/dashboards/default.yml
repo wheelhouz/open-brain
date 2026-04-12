@@ -1,8 +1,0 @@
-apiVersion: 1
-
-providers:
-  - name: default
-    type: file
-    folder: Open Brain
-    options:
-      path: /config/grafana/dashboards

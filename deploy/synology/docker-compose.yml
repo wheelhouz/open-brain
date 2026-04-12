@@ -1,27 +1,4 @@
 services:
-  # --- Init containers ---
-  config-init:
-    image: ${CONFIG_IMAGE:-ghcr.io/wheelhouz/open-brain-config:latest}
-    volumes:
-      - monitoring_config:/out
-    restart: "no"
-
-  permissions-init:
-    image: busybox:1.37
-    volumes:
-      - /volume1/docker/open-brain/prometheus:/data/prometheus
-      - /volume1/docker/open-brain/grafana:/data/grafana
-      - /volume1/docker/open-brain/loki:/data/loki
-    command: >
-      sh -c "
-        chown -R 65534:65534 /data/prometheus &&
-        chown -R 472:472 /data/grafana &&
-        chown -R 10001:10001 /data/loki &&
-        echo 'Permissions set'
-      "
-    restart: "no"
-
-  # --- Core services ---
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -45,7 +22,7 @@ services:
     image: ${DOCKER_IMAGE:-ghcr.io/wheelhouz/open-brain:latest}
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8420:8420"
+      - "8420:8420"
     environment:
       DATABASE_URL: postgresql://brain_app:${DB_PASSWORD}@db:5432/open_brain
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
@@ -62,78 +39,6 @@ services:
         condition: service_healthy
     networks:
       - brain-net
-
-  # --- Monitoring services ---
-  prometheus:
-    image: prom/prometheus:latest
-    command: --config.file=/config/prometheus.yml --storage.tsdb.path=/prometheus
-    volumes:
-      - monitoring_config:/config:ro
-      - /volume1/docker/open-brain/prometheus:/prometheus
-    ports:
-      - "9090:9090"
-    depends_on:
-      config-init:
-        condition: service_completed_successfully
-      permissions-init:
-        condition: service_completed_successfully
-    networks:
-      - brain-net
-    restart: unless-stopped
-
-  grafana:
-    image: grafana/grafana-oss:latest
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_PATHS_PROVISIONING: /config/grafana/provisioning
-    volumes:
-      - /volume1/docker/open-brain/grafana:/var/lib/grafana
-      - monitoring_config:/config:ro
-    ports:
-      - "3001:3000"
-    depends_on:
-      config-init:
-        condition: service_completed_successfully
-      permissions-init:
-        condition: service_completed_successfully
-    networks:
-      - brain-net
-    restart: unless-stopped
-
-  loki:
-    image: grafana/loki:latest
-    command: -config.file=/config/loki.yml
-    volumes:
-      - monitoring_config:/config:ro
-      - /volume1/docker/open-brain/loki:/loki
-    depends_on:
-      config-init:
-        condition: service_completed_successfully
-      permissions-init:
-        condition: service_completed_successfully
-    networks:
-      - brain-net
-    restart: unless-stopped
-
-  promtail:
-    image: grafana/promtail:latest
-    command: -config.file=/config/promtail.yml
-    volumes:
-      - monitoring_config:/config:ro
-      - /volume1/@docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      config-init:
-        condition: service_completed_successfully
-      permissions-init:
-        condition: service_completed_successfully
-    networks:
-      - brain-net
-    restart: unless-stopped
-
-volumes:
-  monitoring_config:
 
 networks:
   brain-net:
