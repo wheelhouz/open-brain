@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
+import { cors } from "hono/cors";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { isHealthy } from "./db.js";
 import { auth } from "./middleware/auth.js";
@@ -26,7 +27,7 @@ import { entitiesRouter } from "./routes/entities.js";
 import { pendingFactsRouter } from "./routes/facts.js";
 import { backfillRouter } from "./routes/backfill.js";
 import { spendRouter } from "./routes/spend.js";
-import { oauthRouter, wellKnownOAuth } from "./routes/oauth.js";
+import { oauthRouter, wellKnownOAuth, wellKnownProtectedResource } from "./routes/oauth.js";
 import { sourceContext } from "./openrouter.js";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -72,15 +73,41 @@ function rateLimit(limit: number, windowMs: number) {
 // Export for testing
 export { rateLimits };
 
+// CORS — required so Claude Cloud's MCP client (a browser-origin context)
+// can preflight /mcp and the OAuth discovery endpoints. `mcp-session-id`
+// must be both accepted and exposed so clients can resume sessions.
+const mcpCors = cors({
+  origin: "*",
+  allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
+  allowHeaders: ["Authorization", "Content-Type", "mcp-session-id"],
+  exposeHeaders: ["mcp-session-id", "WWW-Authenticate"],
+  maxAge: 86400,
+});
+app.use("/mcp", mcpCors);
+app.use("/mcp/*", mcpCors);
+app.use("/oauth/*", mcpCors);
+app.use("/.well-known/*", mcpCors);
+
 // OAuth endpoints — no auth required (they ARE the auth), rate limited
 app.use("/oauth/*", rateLimit(10, 60_000));
 app.route("/.well-known/oauth-authorization-server", wellKnownOAuth);
+app.route("/.well-known/oauth-protected-resource", wellKnownProtectedResource);
 app.route("/oauth", oauthRouter);
 
-// MCP endpoint — handles its own auth, rate limited separately (30/min)
+// MCP endpoint — handles its own auth, rate limited separately (30/min).
+// `X-Accel-Buffering: no` prevents nginx (e.g. on the Synology reverse
+// proxy) from buffering streaming responses.
 app.use("/mcp", rateLimit(30, 60_000));
 app.use("/mcp/*", async (c, next) => {
   return sourceContext.run("mcp", () => next());
+});
+app.use("/mcp", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Accel-Buffering", "no");
+});
+app.use("/mcp/*", async (c, next) => {
+  await next();
+  c.res.headers.set("X-Accel-Buffering", "no");
 });
 app.route("/mcp", mcpRouter);
 

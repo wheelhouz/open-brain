@@ -43,6 +43,15 @@ mcpRouter.all("/", async (c) => {
 
   if (!token || !validateAccessKey(token)) {
     logger.warn({ event: "auth_failure", path: "/mcp", method: c.req.method });
+    // RFC 9728 §5.3 — point clients at the protected-resource metadata so
+    // MCP clients (e.g. Claude Cloud) can discover the authorization server.
+    const proto = c.req.header("x-forwarded-proto") || "http";
+    const host = c.req.header("x-forwarded-host") || c.req.header("host") || new URL(c.req.url).host;
+    const resourceMetadata = `${proto}://${host}/.well-known/oauth-protected-resource`;
+    c.header(
+      "WWW-Authenticate",
+      `Bearer realm="open-brain", resource_metadata="${resourceMetadata}"`,
+    );
     return c.json({ error: "Unauthorized" }, 401);
   }
 

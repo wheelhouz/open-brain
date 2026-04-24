@@ -30,14 +30,24 @@ wellKnownOAuth.get("/", (c) => {
   });
 });
 
-// Dynamic Client Registration (RFC 7591) — requires access token
-oauthRouter.post("/register", async (c) => {
-  const authHeader = c.req.header("Authorization");
-  const regToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!regToken || !validateAccessKey(regToken)) {
-    return c.json({ error: "Registration requires access token" }, 401);
-  }
+// RFC 9728 — OAuth Protected Resource Metadata. Claude Cloud's MCP client
+// fetches this to discover which authorization server protects /mcp.
+export const wellKnownProtectedResource = new Hono();
+for (const path of ["/", "/mcp"] as const) {
+  wellKnownProtectedResource.get(path, (c) => {
+    const issuer = getOrigin(c);
+    return c.json({
+      resource: `${issuer}/mcp`,
+      authorization_servers: [issuer],
+      bearer_methods_supported: ["header"],
+    });
+  });
+}
 
+// Dynamic Client Registration (RFC 7591) — unauthenticated. The client
+// has no token yet at registration time; the access token is issued later
+// via /oauth/authorize + /oauth/token. Rate-limited at the app level.
+oauthRouter.post("/register", async (c) => {
   const body = await c.req.json();
   const clientId = crypto.randomUUID();
   const clientSecret = crypto.randomUUID();
@@ -55,7 +65,25 @@ oauthRouter.post("/register", async (c) => {
   );
 });
 
-const ALLOWED_REDIRECT_PATTERN = /^http:\/\/localhost(:\d+)?(\/.*)?$|^http:\/\/127\.0\.0\.1(:\d+)?(\/.*)?$/;
+function isAllowedRedirect(uri: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return false;
+  }
+  const { protocol, hostname } = url;
+  if (
+    (hostname === "localhost" || hostname === "127.0.0.1") &&
+    (protocol === "http:" || protocol === "https:")
+  ) {
+    return true;
+  }
+  if (protocol !== "https:") return false;
+  if (hostname === "claude.ai" || hostname.endsWith(".claude.ai")) return true;
+  if (hostname.endsWith(".anthropic.com")) return true;
+  return false;
+}
 
 // Authorization endpoint — renders a simple login page
 oauthRouter.get("/authorize", (c) => {
@@ -65,10 +93,10 @@ oauthRouter.get("/authorize", (c) => {
   const codeChallenge = c.req.query("code_challenge") || "";
   const codeChallengeMethod = c.req.query("code_challenge_method") || "";
 
-  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+  if (redirectUri && !isAllowedRedirect(redirectUri)) {
     return c.html(
       `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
-        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+        <p>Invalid redirect URI.</p>
       </body></html>`,
       400,
     );
@@ -128,10 +156,10 @@ oauthRouter.post("/authorize", async (c) => {
   const codeChallenge = body["code_challenge"] as string;
   const codeChallengeMethod = body["code_challenge_method"] as string;
 
-  if (redirectUri && !ALLOWED_REDIRECT_PATTERN.test(redirectUri)) {
+  if (redirectUri && !isAllowedRedirect(redirectUri)) {
     return c.html(
       `<!DOCTYPE html><html><body style="font-family:system-ui;background:#0f172a;color:#f87171;display:flex;align-items:center;justify-content:center;min-height:100vh">
-        <p>Invalid redirect URI. Only localhost URIs are allowed.</p>
+        <p>Invalid redirect URI.</p>
       </body></html>`,
       400,
     );
