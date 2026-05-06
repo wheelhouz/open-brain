@@ -5,11 +5,18 @@ for (const key of requiredEnvVars) {
   }
 }
 
+function normalizeOrigin(origin: string | undefined): string | undefined {
+  const trimmed = origin?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/\/+$/, "");
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "8420", 10),
   databaseUrl: process.env.DATABASE_URL!,
   brainAccessKey: process.env.BRAIN_ACCESS_KEY!,
   openrouterApiKey: process.env.OPENROUTER_API_KEY!,
+  publicOrigin: normalizeOrigin(process.env.PUBLIC_ORIGIN),
   embeddingModel: process.env.EMBEDDING_MODEL || "openai/text-embedding-3-small",
   extractionModel: process.env.EXTRACTION_MODEL || "openai/gpt-4o-mini",
   chatModel: process.env.CHAT_MODEL || "anthropic/claude-sonnet-4-6",

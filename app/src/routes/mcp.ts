@@ -4,6 +4,7 @@ import { createMcpServer } from "../mcp.js";
 import { validateAccessKey } from "../auth.js";
 import { logger } from "../logger.js";
 import { mcpSessionsCreatedTotal, mcpActiveSessions } from "../metrics.js";
+import { getPublicOrigin } from "../origin.js";
 
 export const mcpRouter = new Hono();
 
@@ -45,9 +46,7 @@ mcpRouter.all("/", async (c) => {
     logger.warn({ event: "auth_failure", path: "/mcp", method: c.req.method });
     // RFC 9728 §5.3 — point clients at the protected-resource metadata so
     // MCP clients (e.g. Claude Cloud) can discover the authorization server.
-    const proto = c.req.header("x-forwarded-proto") || "http";
-    const host = c.req.header("x-forwarded-host") || c.req.header("host") || new URL(c.req.url).host;
-    const resourceMetadata = `${proto}://${host}/.well-known/oauth-protected-resource`;
+    const resourceMetadata = `${getPublicOrigin(c.req)}/.well-known/oauth-protected-resource`;
     c.header(
       "WWW-Authenticate",
       `Bearer realm="open-brain", resource_metadata="${resourceMetadata}"`,

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { config } from "../config.js";
 import { validateAccessKey } from "../auth.js";
+import { getPublicOrigin } from "../origin.js";
 
 const oauthRouter = new Hono();
 
@@ -8,10 +9,7 @@ const oauthRouter = new Hono();
 const authCodes = new Map<string, { expiresAt: number; redirectUri: string }>();
 
 function getOrigin(c: { req: { header: (name: string) => string | undefined; url: string } }): string {
-  const proto = c.req.header("x-forwarded-proto") || "http";
-  const host = c.req.header("x-forwarded-host") || c.req.header("host");
-  if (host) return `${proto}://${host}`;
-  return new URL(c.req.url).origin;
+  return getPublicOrigin(c.req);
 }
 
 // RFC 8414 — OAuth Authorization Server Metadata (exported separately for root mounting)

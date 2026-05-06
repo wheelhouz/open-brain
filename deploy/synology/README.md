@@ -8,7 +8,7 @@ Deployment config for running Open Brain on a Synology NAS via Portainer.
 2. In **Portainer > Registries**, add your Docker registry credentials if using a private image
 3. Create the data directory via **DSM > File Station**: `/volume1/docker/open-brain/data`
 4. In **Portainer > Stacks > Add stack**, paste the contents of `docker-compose.yml`
-5. Add environment variables: `DB_PASSWORD`, `OPENROUTER_API_KEY`, `BRAIN_ACCESS_KEY`
+5. Add environment variables: `DB_PASSWORD`, `OPENROUTER_API_KEY`, `BRAIN_ACCESS_KEY`, `PUBLIC_ORIGIN`
 6. Deploy the stack
 
 The DB schema is auto-initialized by the app on startup (idempotent). Data is stored at `/volume1/docker/open-brain/data` on the NAS filesystem -- it survives container restarts, image updates, and `docker compose down`.
@@ -57,6 +57,8 @@ curl https://brain.yourdomain.com/health
 curl https://brain.yourdomain.com/.well-known/oauth-authorization-server
 # Should return JSON with https:// URLs
 ```
+
+Set `PUBLIC_ORIGIN=https://brain.yourdomain.com` in Portainer. This keeps OAuth discovery stable even if DSM forwards traffic to the container over plain HTTP without `X-Forwarded-Proto`.
 
 ## Deploying changes
 

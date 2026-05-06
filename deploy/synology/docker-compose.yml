@@ -27,6 +27,7 @@ services:
       DATABASE_URL: postgresql://brain_app:${DB_PASSWORD}@db:5432/open_brain
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       BRAIN_ACCESS_KEY: ${BRAIN_ACCESS_KEY}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-sonnet-4-6}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-openai/text-embedding-3-small}
       EXTRACTION_MODEL: ${EXTRACTION_MODEL:-openai/gpt-4o-mini}

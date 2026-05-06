@@ -102,6 +102,8 @@ The MCP endpoint is available at `/mcp` and supports two auth methods:
 3. You'll be redirected to a login page -- enter your `BRAIN_ACCESS_KEY`
 4. Claude exchanges the auth code for a bearer token and connects
 
+If Open Brain runs behind a TLS-terminating reverse proxy, set `PUBLIC_ORIGIN=https://brain.yourdomain.com` so OAuth discovery always advertises public HTTPS URLs.
+
 ### Connecting from Claude Code (CLI)
 
 Add to your Claude Code MCP config:

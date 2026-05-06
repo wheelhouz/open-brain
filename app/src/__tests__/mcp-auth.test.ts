@@ -42,6 +42,58 @@ describe("RFC 9728 protected-resource metadata", () => {
   });
 });
 
+describe("OAuth public origin detection", () => {
+  it("uses https for public hosts when proxy proto headers are absent", async () => {
+    const res = await app.request("/.well-known/oauth-authorization-server", {
+      headers: { Host: "brain.example.com" },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.issuer).toBe("https://brain.example.com");
+    expect(body.authorization_endpoint).toBe(
+      "https://brain.example.com/oauth/authorize",
+    );
+  });
+
+  it("keeps localhost discovery on http", async () => {
+    const res = await app.request("/.well-known/oauth-authorization-server", {
+      headers: { Host: "localhost:8420" },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.issuer).toBe("http://localhost:8420");
+  });
+
+  it("honors forwarded proto and host headers", async () => {
+    const res = await app.request("/.well-known/oauth-authorization-server", {
+      headers: {
+        Host: "localhost:8420",
+        "X-Forwarded-Host": "brain.example.com",
+        "X-Forwarded-Proto": "https",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.issuer).toBe("https://brain.example.com");
+  });
+
+  it("parses RFC 7239 Forwarded headers", async () => {
+    const res = await app.request("/.well-known/oauth-authorization-server", {
+      headers: {
+        Host: "localhost:8420",
+        Forwarded: "for=192.0.2.1;proto=https;host=brain.example.com",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.issuer).toBe("https://brain.example.com");
+  });
+});
+
 describe("OAuth dynamic client registration (RFC 7591)", () => {
   it("accepts registration without a bearer token", async () => {
     const res = await app.request("/oauth/register", {
@@ -114,7 +166,7 @@ describe("/mcp 401 discovery hints", () => {
   it("emits WWW-Authenticate pointing at the resource metadata", async () => {
     const res = await app.request("/mcp", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { Host: "brain.example.com", "Content-Type": "application/json" },
       body: "{}",
     });
     expect(res.status).toBe(401);
@@ -123,7 +175,9 @@ describe("/mcp 401 discovery hints", () => {
     expect(wwwAuth).toContain(
       "resource_metadata=",
     );
-    expect(wwwAuth).toContain("/.well-known/oauth-protected-resource");
+    expect(wwwAuth).toContain(
+      "https://brain.example.com/.well-known/oauth-protected-resource",
+    );
   });
 
   it("sets X-Accel-Buffering: no on /mcp responses", async () => {
